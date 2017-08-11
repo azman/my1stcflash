@@ -236,16 +236,16 @@ int main(int argc, char* argv[])
 	{
 		case STC_SYNC_DONE:
 			printf(" done!\n");
-			printf("\nPacket: ");
-			for(loop=0;loop<pdevice.pcount;loop++)
-			{
-				printf("[%02X]",pdevice.packet[loop]);
-			}
-			printf("\n");
 			switch(stc_validate_packet(&pdevice))
 			{
 				case STC_PACKET_VALID:
-					printf("Everything OK!\n");
+					printf("\nFound valid packet!");
+					printf("\nPayload: ");
+					for(loop=0;loop<pdevice.packinfo.psize;loop++)
+					{
+						printf("[%02X]",pdevice.packinfo.pdata[loop]);
+					}
+					printf("\n");
 					break;
 				case STC_PACKET_ERROR_BEGMARK:
 					printf("ERROR Start marker!\n");
@@ -272,6 +272,10 @@ int main(int argc, char* argv[])
 				}
 				default:
 					printf("ERROR huh???\n");
+					printf("\nPacket: ");
+					for(loop=0;loop<pdevice.pcount;loop++)
+						printf("[%02X]",pdevice.packet[loop]);
+					printf("\n");
 					break;
 			}
 			break;
