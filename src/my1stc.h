@@ -68,6 +68,48 @@ typedef struct _stc_packet_t
 }
 stc_packet_t;
 /*----------------------------------------------------------------------------*/
+/*
+Info I got are from stcgal https://github.com/grigorig/stcgal (doc)
+
+Payload: 0x50, SYNC00, SYNC01, ..., SYNC70, SYNC71,
+         V1, V2, 0x00, ID0, ID1, 0x8c,
+         MS0, ..., MS7,
+         UID0, ..., UID6,
+         unknown bytes follow
+SYNC* := sequence of 8 16-bit big-endian counter values, recorded
+         from the initial 0x7f sync sequence. this can be used to
+         determine the MCU clock frequency.
+
+V1    := version number, two digits packed BCD.
+V2    := stepping, one ASCII character.
+ID0   := MCU model ID, byte 1
+ID1   := MCU model ID, byte 2
+UID0...UID6 := 7 bytes of unique id
+
+UID is only sent by some BSL versions, others send zero bytes.
+*/
+/*----------------------------------------------------------------------------*/
+typedef struct _stc_payload_info_t
+{
+	unsigned char flag; /* 0x50 */
+	unsigned short sync[8]; /* 16-bit big-endian */
+	unsigned char ver1; /* bcd format? */
+	unsigned char ver2; /* single ascii char? */
+	unsigned char nul1; /* nul-byte */
+	unsigned char mid[2]; /* 2-byte model id! */
+	unsigned char nul2; /* 0x8c? */
+	unsigned char ms[8]; /* what??? */
+	unsigned char uid[7]; /* 7-bytes unique id? */
+	unsigned char un1[5]; /* unknown bytes */
+	/* total 43 bytes??? */
+}
+stc_payload_info_t;
+#define PAYLOAD_INFO_ID 0x50
+#define PAYLOAD_INFO_OFFSET_FLAG 0x00
+#define PAYLOAD_INFO_OFFSET_SYNC 0x09
+#define PAYLOAD_INFO_OFFSET_VER1 0x11
+#define PAYLOAD_INFO_OFFSET_VER2 0x12
+/*----------------------------------------------------------------------------*/
 typedef struct _stc_dev_t
 {
 	int pcount;

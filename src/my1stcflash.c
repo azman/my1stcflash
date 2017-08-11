@@ -239,14 +239,35 @@ int main(int argc, char* argv[])
 			switch(stc_validate_packet(&pdevice))
 			{
 				case STC_PACKET_VALID:
-					printf("\nFound valid packet!");
-					printf("\nPayload: ");
-					for(loop=0;loop<pdevice.packinfo.psize;loop++)
+				{
+					printf("\nFound valid packet! (%d)",pdevice.packinfo.psize);
+					unsigned char* byte = pdevice.packinfo.pdata;
+					if (byte[PAYLOAD_INFO_OFFSET_FLAG]==PAYLOAD_INFO_ID)
 					{
-						printf("[%02X]",pdevice.packinfo.pdata[loop]);
+						float temp;
+						int vv11, vv12, fval;
+						printf("\nInfo Payload! (%02x)",PAYLOAD_INFO_ID);
+						fval = byte[PAYLOAD_INFO_OFFSET_SYNC] & 0xff;
+						fval = fval << 8;
+						fval += byte[PAYLOAD_INFO_OFFSET_SYNC+1] & 0xff;
+						temp = (float)fval/8*9600/580974;
+						printf("\nFOSC: (%.4f)",temp);
+						vv11 = byte[PAYLOAD_INFO_OFFSET_VER1] & 0xff;
+						vv12 = (vv11&0x0f); 
+						vv11 = (vv11&0xf0)>>4;
+						printf("\nModel Version: (%d.%d)",vv11,vv12);
 					}
-					printf("\n");
+					//else
+					{
+						printf("\nPayload: ");
+						for(loop=0;loop<pdevice.packinfo.psize;loop++)
+						{
+							printf("[%02X]",pdevice.packinfo.pdata[loop]);
+						}
+						printf("\n");
+					}
 					break;
+				}
 				case STC_PACKET_ERROR_BEGMARK:
 					printf("ERROR Start marker!\n");
 					break;
