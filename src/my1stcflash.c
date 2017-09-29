@@ -5,6 +5,7 @@
 /*----------------------------------------------------------------------------*/
 #include <stdio.h>
 #include <string.h>
+#include <sys/time.h>
 /*----------------------------------------------------------------------------*/
 #define PROGNAME "my1stcflash"
 /*----------------------------------------------------------------------------*/
@@ -87,6 +88,16 @@ int get_actual_baudrate(int encoded_rate)
 		case MY1BAUD115200: baudrate = 115200; break;
 	}
 	return baudrate;
+}
+/*----------------------------------------------------------------------------*/
+void print_currtime(FILE* pfile)
+{
+	double test;
+	struct timeval inittime;
+	gettimeofday(&inittime,0x0);
+	test = (double)inittime.tv_sec;
+	test += (double)inittime.tv_usec/1000000;
+	fprintf(pfile,"[%20.6lf]",test);
 }
 /*----------------------------------------------------------------------------*/
 int main(int argc, char* argv[])
@@ -214,6 +225,9 @@ int main(int argc, char* argv[])
 	}
 	cConf.mParity = MY1PARITY_EVEN; /** stc12 uses this! */
 
+	/* device interface configuration */
+	device.timeout_us = STC_SYNC_TIMEOUT_US;
+
 	/** set the desired config */
 	set_serialconfig(&cPort,&cConf);
 
@@ -230,11 +244,12 @@ int main(int argc, char* argv[])
 
 	/** start doing things */
 	printf("\nLooking for STC12 device... ");
-	test = stc_check_isp(&device,&cPort,STC_SYNC_T_MS);
-	printf("found! (%d)",test);
+	test = stc_check_isp(&device,&cPort);
 
-	if (test==STC_SYNC_DONE&&stc_extract_info(&device)==STC_PACKET_VALID)
+	if (test==STC_SYNC_DONE&&stc_check_info(&device)==STC_PACKET_VALID)
 	{
+		printf("found! ");
+		print_currtime(stdout);
 		printf("\nFirmware: %d.%d%c (Payload: 0x%02x)",
 				device.fw11,device.fw12,(char)device.fw20,device.flag);
 		printf("\nMCU Freq: %.4f MHz",device.freq);
@@ -242,27 +257,23 @@ int main(int argc, char* argv[])
 			(device.uid1==STC_DEVICE_12C5A60S2_MID2))
 		{
 			printf("\nMCU Dev#: STC12C5A60S2");
-/*			// handshake?
-			get_serialconfig(&cPort,&cConf);
-			cConf.mBaudRate = MY1BAUD19200;
-			set_serialconfig(&cPort,&cConf);
-			close_serial(&cPort);
-			open_serial(&cPort);
-			purge_serial(&cPort);
-*/
-			printf("\nInit handshake... ");
-			test = stc_init_handshake(&device,&cPort);
-			printf("done (%d)",test);
-			printf("\nHandshake Packet: ");
-			for(loop=0;loop<device.pcount;loop++)
-				printf("[%02X]",device.packet[loop]);
 		}
 		else
 		{
 			printf("\nUnknown device (%01x/%01x)!",
 				device.uid0,device.uid1);
 		}
+		printf("\n[CHECK] ");
+		print_currtime(stdout);
+		//device.timeout_us = 500000;
+		printf("\nInit handshake... ");
+		test = stc_handshake(&device,&cPort);
+		printf("done (%d){%d}",test,device.pcount);
+		printf("\nHandshake Packet: ");
+		for(loop=0;loop<device.pcount;loop++)
+			printf("[%02X]",device.packet[loop]);
 	}
+	else printf("error? (%d)",test);
 	putchar('\n');
 
 	/** we are done */

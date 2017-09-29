@@ -5,7 +5,7 @@
 #include "my1comlib.h"
 /*----------------------------------------------------------------------------*/
 #define STC_SYNC_CHAR 0x7f
-#define STC_SYNC_T_MS 150
+#define STC_SYNC_TIMEOUT_US 150000
 #define STC_SYNC_INIT -2
 #define STC_SYNC_MISS -1
 #define STC_SYNC_DONE 0
@@ -71,6 +71,7 @@ stc_payload_info_t;
 /*----------------------------------------------------------------------------*/
 typedef struct _stc_dev_t
 {
+	int timeout_us; /* timeout in microsecond resolution */
 	int pcount;
 	unsigned char packet[STC_PACKET_SIZE];
 	stc_packet_t info;
@@ -80,11 +81,9 @@ typedef struct _stc_dev_t
 }
 stc_dev_t;
 /*----------------------------------------------------------------------------*/
-int stc_check_isp(stc_dev_t* pdevice, serial_port_t* pport, int timeout_ms);
-int stc_validate_packet(stc_dev_t* pdevice);
-int stc_extract_info(stc_dev_t* pdevice);
-int stc_wait_handshake(stc_dev_t* pdevice, serial_port_t* pport);
-int stc_init_handshake(stc_dev_t* pdevice, serial_port_t* pport);
+int stc_check_isp(stc_dev_t* pdevice, serial_port_t* pport);
+int stc_check_info(stc_dev_t* pdevice);
+int stc_handshake(stc_dev_t* pdevice, serial_port_t* pport);
 /*----------------------------------------------------------------------------*/
 #endif
 /*----------------------------------------------------------------------------*/

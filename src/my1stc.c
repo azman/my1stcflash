@@ -6,14 +6,30 @@
 //#include <string.h>
 #include <sys/time.h>
 /*----------------------------------------------------------------------------*/
-int stc_check_isp(stc_dev_t* pdevice, serial_port_t* pport, int timeout_ms)
+int stc_wait_packet(stc_dev_t* pdevice, serial_port_t* pport)
+{
+	int temp;
+	pdevice->pcount = 0;
+	while(1)
+	{
+		temp = get_byte_serial_timed(pport,pdevice->timeout_us);
+		if(temp==SERIAL_TIMEOUT)
+			break;
+		if(pdevice->pcount<STC_PACKET_SIZE)
+			pdevice->packet[pdevice->pcount++] = (byte_t) temp;
+		else
+			break;
+		if (temp==STC_PACKET_ME) break; /* stop if we find end marker! */
+	}
+	return temp==SERIAL_TIMEOUT?temp:pdevice->pcount;
+}
+/*----------------------------------------------------------------------------*/
+int stc_check_isp(stc_dev_t* pdevice, serial_port_t* pport)
 {
 	struct timeval inittime, currtime;
 	my1key_t key;
 	int do_wait = 0;
 	int status = STC_SYNC_INIT;
-	/* gettimeofday is using micro-second resolution! */
-	timeout_ms *= 1000;
 	while(status<STC_SYNC_DONE)
 	{
 		if(!do_wait)
@@ -24,35 +40,19 @@ int stc_check_isp(stc_dev_t* pdevice, serial_port_t* pport, int timeout_ms)
 		}
 		else
 		{
+			/* gettimeofday is using micro-second resolution! */
 			gettimeofday(&currtime,0x0);
 			if((currtime.tv_sec>inittime.tv_sec)||
-				(currtime.tv_usec-inittime.tv_usec)>timeout_ms)
+				(currtime.tv_usec-inittime.tv_usec)>pdevice->timeout_us)
 			{
 				do_wait = 0;
 			}
 		}
 		if(check_incoming(pport))
 		{
-			do_wait = 1;
-			pdevice->pcount = 0;
-			while(do_wait)
-			{
-				int temp = get_byte_serial_timed(pport,timeout_ms);
-				if(temp==SERIAL_TIMEOUT)
-					break;
-				if(pdevice->pcount<STC_PACKET_SIZE)
-				{
-					pdevice->packet[pdevice->pcount++] = (byte_t) temp;
-				}
-				else
-				{
-					/* if this char is NOT end marker, we're screwed! */
-					if(temp!=STC_PACKET_ME)
-						status = STC_SYNC_MISS;
-					break;
-				}
-			}
-			if(status==STC_SYNC_INIT)
+			if (stc_wait_packet(pdevice,pport)==SERIAL_TIMEOUT)
+				status = STC_SYNC_MISS;
+			else
 				status = STC_SYNC_DONE;
 			break;
 		}
@@ -122,7 +122,7 @@ int stc_validate_packet(stc_dev_t* pdevice)
 	return test;
 }
 /*----------------------------------------------------------------------------*/
-int stc_extract_info(stc_dev_t* pdevice)
+int stc_check_info(stc_dev_t* pdevice)
 {
 	int loop, test = stc_validate_packet(pdevice);
 	if (test==STC_PACKET_VALID)
@@ -157,41 +157,10 @@ int stc_extract_info(stc_dev_t* pdevice)
 	return test;
 }
 /*----------------------------------------------------------------------------*/
-int stc_wait_handshake(stc_dev_t* pdevice, serial_port_t* pport)
+int stc_handshake(stc_dev_t* pdevice, serial_port_t* pport)
 {
 	my1key_t key;
-	int status = 0;
-	pdevice->pcount = 0;
-	while(1)
-	{
-		if(check_incoming(pport))
-		{
-			int temp = get_byte_serial(pport);
-			if(pdevice->pcount<STC_PACKET_SIZE)
-			{
-				pdevice->packet[pdevice->pcount++] = (byte_t) temp;
-			}
-			else
-			{
-				/* if this char is NOT end marker, we're screwed! */
-				if(temp!=STC_PACKET_ME)
-					status = -1;
-				break;
-			}
-		}
-		key = get_keyhit();
-		if(key==KEY_ESCAPE)
-		{
-			status = -2;
-			break;
-		}
-	}
-	return status<0?status:pdevice->pcount;
-}
-/*----------------------------------------------------------------------------*/
-int stc_init_handshake(stc_dev_t* pdevice, serial_port_t* pport)
-{
-	int loop;
+	int status = 0, loop;
 	unsigned short temp;
 	pdevice->pcount = 15;
 	pdevice->packet[0] = STC_PACKET_M0;
@@ -215,7 +184,27 @@ int stc_init_handshake(stc_dev_t* pdevice, serial_port_t* pport)
 	pdevice->packet[pdevice->pcount-1] = STC_PACKET_ME;
 	/* send packet */
 	for (loop=0;loop<pdevice->pcount;loop++)
+	{
+#include <stdio.h>
+		printf("[%02x]",pdevice->packet[loop]);
 		put_byte_serial(pport,pdevice->packet[loop]);
-	return stc_wait_handshake(pdevice,pport);
+	}
+	/* wait for response */
+	while(1)
+	{
+		if(check_incoming(pport))
+		{
+			if (stc_wait_packet(pdevice,pport)==SERIAL_TIMEOUT)
+				status = -1;
+			break;
+		}
+		key = get_keyhit();
+		if(key==KEY_ESCAPE)
+		{
+			status = -2;
+			break;
+		}
+	}
+	return status<0?status:pdevice->pcount;
 }
 /*----------------------------------------------------------------------------*/
