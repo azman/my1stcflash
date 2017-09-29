@@ -96,7 +96,7 @@ int main(int argc, char* argv[])
 	int loop, test, port=1, baudrate = 0;
 	int do_command = COMMAND_NONE;
 	char *pfile = 0x0, *ptty = 0x0;
-	stc_dev_t pdevice;
+	stc_dev_t device;
 
 	/* print tool info */
 	printf("\n%s - STC Flash Tool (version %s)\n",PROGNAME,PROGVERS);
@@ -230,85 +230,38 @@ int main(int argc, char* argv[])
 
 	/** start doing things */
 	printf("\nLooking for STC12 device... ");
-	test = stc_check_isp(&pdevice,&cPort,STC_SYNC_T_MS);
+	test = stc_check_isp(&device,&cPort,STC_SYNC_T_MS);
+	printf("found! (%d)",test);
 
-	switch(test)
+	if (test==STC_SYNC_DONE&&stc_extract_info(&device)==STC_PACKET_VALID)
 	{
-		case STC_SYNC_DONE:
-			printf(" done!\n");
-			switch(stc_validate_packet(&pdevice))
-			{
-				case STC_PACKET_VALID:
-				{
-					printf("\nFound valid packet! (%d)",pdevice.packinfo.psize);
-					unsigned char* byte = pdevice.packinfo.pdata;
-					if (byte[PAYLOAD_INFO_OFFSET_FLAG]==PAYLOAD_INFO_ID)
-					{
-						float temp;
-						int vv11, vv12, fval;
-						printf("\nInfo Payload! (%02x)",PAYLOAD_INFO_ID);
-						fval = byte[PAYLOAD_INFO_OFFSET_SYNC] & 0xff;
-						fval = fval << 8;
-						fval += byte[PAYLOAD_INFO_OFFSET_SYNC+1] & 0xff;
-						temp = (float)fval/8*9600/580974;
-						printf("\nFOSC: (%.4f)",temp);
-						vv11 = byte[PAYLOAD_INFO_OFFSET_VER1] & 0xff;
-						vv12 = (vv11&0x0f); 
-						vv11 = (vv11&0xf0)>>4;
-						printf("\nModel Version: (%d.%d)",vv11,vv12);
-					}
-					//else
-					{
-						printf("\nPayload: ");
-						for(loop=0;loop<pdevice.packinfo.psize;loop++)
-						{
-							printf("[%02X]",pdevice.packinfo.pdata[loop]);
-						}
-						printf("\n");
-					}
-					break;
-				}
-				case STC_PACKET_ERROR_BEGMARK:
-					printf("ERROR Start marker!\n");
-					break;
-				case STC_PACKET_ERROR_ENDMARK:
-					printf("ERROR End marker!\n");
-					break;
-				case STC_PACKET_ERROR_DIRECT:
-					printf("ERROR direction!\n");
-					break;
-				case STC_PACKET_ERROR_LENGTH:
-					printf("ERROR length! (%d/%d)\n",
-						pdevice.packinfo.dsize,pdevice.pcount);
-					break;
-				case STC_PACKET_ERROR_CHECKSUM:
-				{
-					/* do checksum */
-					unsigned short cksum = 0x0000;
-					for(loop=2;loop<pdevice.pcount-3;loop++)
-						cksum += pdevice.packet[loop];
-					printf("ERROR checksum! (%04x/%04x)\n",
-						pdevice.packinfo.cksum,cksum);
-					break;
-				}
-				default:
-					printf("ERROR huh???\n");
-					printf("\nPacket: ");
-					for(loop=0;loop<pdevice.pcount;loop++)
-						printf("[%02X]",pdevice.packet[loop]);
-					printf("\n");
-					break;
-			}
-			break;
-		case STC_SYNC_REST:
-			printf(" user reset!\n");
-			break;
-		case STC_SYNC_NONE:
-			printf(" user abort!\n");
-			break;
-		case STC_SYNC_MISS:
-			printf(" buffer overflow!\n");
-			break;
+		printf("\nFirmware: %d.%d%c (Payload: 0x%02x)",
+				device.fw11,device.fw12,(char)device.fw20,device.flag);
+		printf("\nMCU Freq: %.4f MHz",device.freq);
+		if ((device.uid0==STC_DEVICE_12C5A60S2_MID1)&&
+			(device.uid1==STC_DEVICE_12C5A60S2_MID2))
+		{
+			printf("\nMCU Dev#: STC12C5A60S2");
+/*			// handshake?
+			get_serialconfig(&cPort,&cConf);
+			cConf.mBaudRate = MY1BAUD19200;
+			set_serialconfig(&cPort,&cConf);
+			close_serial(&cPort);
+			open_serial(&cPort);
+			purge_serial(&cPort);
+*/
+			printf("\nInit handshake... ");
+			test = stc_init_handshake(&device,&cPort);
+			printf("done (%d)",test);
+			printf("\nHandshake Packet: ");
+			for(loop=0;loop<device.pcount;loop++)
+				printf("[%02X]",device.packet[loop]);
+		}
+		else
+		{
+			printf("\nUnknown device (%01x/%01x)!",
+				device.uid0,device.uid1);
+		}
 	}
 	putchar('\n');
 
