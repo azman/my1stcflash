@@ -157,54 +157,103 @@ int stc_check_info(stc_dev_t* pdevice)
 	return test;
 }
 /*----------------------------------------------------------------------------*/
-int stc_handshake(stc_dev_t* pdevice, serial_port_t* pport)
+int stc_packet_pack(stc_dev_t* pdevice, unsigned char* pdata, int dsize)
 {
-	my1key_t key;
-	int status = 0, loop;
+	int loop;
 	unsigned short temp;
-	pdevice->pcount = 15;
+	pdevice->pcount = 8 + dsize;
 	pdevice->packet[0] = STC_PACKET_M0;
 	pdevice->packet[1] = STC_PACKET_M1;
 	pdevice->packet[2] = STC_PACKET_HOST2MCU;
 	temp = pdevice->pcount-2;
 	pdevice->packet[3] = (unsigned char)((temp&0xff00)>>8);
 	pdevice->packet[4] = (unsigned char)(temp&0xff);
-	pdevice->packet[5] = pdevice->flag;
-	pdevice->packet[6] = 0x00;
-	pdevice->packet[7] = 0x00;
-	pdevice->packet[8] = 0x36;
-	pdevice->packet[9] = 0x01;
-	pdevice->packet[10] = (unsigned char)(pdevice->uid0&0xff);
-	pdevice->packet[11] = (unsigned char)(pdevice->uid1&0xff);
+	/* place data */
+	for (loop=0;loop<dsize;loop++)
+		pdevice->packet[loop+STC_PACKET_DATA_OFFSET] = pdata[loop];
+	loop += STC_PACKET_DATA_OFFSET;
 	/* get checksum */
 	temp = stc_generate_chksum(pdevice);
-	pdevice->packet[12] = (unsigned char)((temp&0xff00)>>8);
-	pdevice->packet[13] = (unsigned char)(temp&0xff);
+	pdevice->packet[loop++] = (unsigned char)((temp&0xff00)>>8);
+	pdevice->packet[loop++] = (unsigned char)(temp&0xff);
 	/* end marker */
-	pdevice->packet[pdevice->pcount-1] = STC_PACKET_ME;
-	/* send packet */
+	pdevice->packet[loop++] = STC_PACKET_ME;
+	/* returns packet size */
+	return loop;
+}
+/*----------------------------------------------------------------------------*/
+#define STC_PACKET_WAIT_TIMEOUT -1
+#define STC_PACKET_USER_ABORT -2
+#define STC_PACKET_VALIDATE_ERROR -3
+#define STC_PACKET_HANDSHAKE_ERROR -4
+/*----------------------------------------------------------------------------*/
+int stc_packet_send(stc_dev_t* pdevice, serial_port_t* pport)
+{
+	my1key_t key;
+	int loop, test = 0;
 	for (loop=0;loop<pdevice->pcount;loop++)
 	{
 #include <stdio.h>
 		printf("[%02x]",pdevice->packet[loop]);
 		put_byte_serial(pport,pdevice->packet[loop]);
 	}
-	/* wait for response */
 	while(1)
 	{
 		if(check_incoming(pport))
 		{
 			if (stc_wait_packet(pdevice,pport)==SERIAL_TIMEOUT)
-				status = -1;
+				test = STC_PACKET_WAIT_TIMEOUT;
+			else if (stc_validate_packet(pdevice)!=STC_PACKET_VALID)
+				test = STC_PACKET_VALIDATE_ERROR;
 			break;
 		}
 		key = get_keyhit();
 		if(key==KEY_ESCAPE)
 		{
-			status = -2;
+			test = STC_PACKET_USER_ABORT;
 			break;
 		}
 	}
-	return status<0?status:pdevice->pcount;
+	pdevice->error = test;
+	return test;
+}
+/*----------------------------------------------------------------------------*/
+int stc_handshake(stc_dev_t* pdevice, serial_port_t* pport)
+{
+	unsigned char data[] = { pdevice->flag, 0x00, 0x00, 0x36, 0x01,
+		(unsigned char)(pdevice->uid0&0xff),
+		(unsigned char)(pdevice->uid1&0xff)};
+	/* form packet */
+	stc_packet_pack(pdevice,data,sizeof(data));
+	/* send packet */
+	if (!stc_packet_send(pdevice,pport))
+	{
+		pdevice->flag = pdevice->info.pdata[PAYLOAD_INFO_OFFSET_FLAG];
+		if (pdevice->flag!=PAYLOAD_HANDSHAKE_ID||pdevice->info.dsize!=1)
+			pdevice->error = STC_PACKET_HANDSHAKE_ERROR;
+	}
+	return pdevice->error;
+}
+/*----------------------------------------------------------------------------*/
+int stc_bauddance(stc_dev_t* pdevice, serial_port_t* pport)
+{
+/*
+sample_rate = 16 (6T) or 32
+brt = 65536 - round((freq)/(baudrate*sample_rate))
+brt_csum = (2*(256-brt))&0xff
+*/
+	unsigned char baud = 0xb8; /* 11.0592MHz, 6T mode */
+	unsigned char bsum = 0x90;
+	unsigned char dlay = 0x80; /* stc-isp=>0xa0, stc-gal=>0x40 */
+	unsigned char iapw = 0x83; /* iap wait register? */
+	unsigned char data[] = { pdevice->flag,0xc0,baud,0x3f,bsum,dlay,iapw };
+	/* form packet */
+	stc_packet_pack(pdevice,data,sizeof(data));
+	/* send packet */
+	if (!stc_packet_send(pdevice,pport))
+	{
+		pdevice->flag = pdevice->info.pdata[PAYLOAD_INFO_OFFSET_FLAG];
+	}
+	return pdevice->error;
 }
 /*----------------------------------------------------------------------------*/

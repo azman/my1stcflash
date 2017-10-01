@@ -227,6 +227,7 @@ int main(int argc, char* argv[])
 
 	/* device interface configuration */
 	device.timeout_us = STC_SYNC_TIMEOUT_US;
+	device.error = 0;
 
 	/** set the desired config */
 	set_serialconfig(&cPort,&cConf);
@@ -249,7 +250,10 @@ int main(int argc, char* argv[])
 	if (test==STC_SYNC_DONE&&stc_check_info(&device)==STC_PACKET_VALID)
 	{
 		printf("found! ");
+#ifdef MY1DEBUG
+		printf("\n[CHECK] ");
 		print_currtime(stdout);
+#endif
 		printf("\nFirmware: %d.%d%c (Payload: 0x%02x)",
 				device.fw11,device.fw12,(char)device.fw20,device.flag);
 		printf("\nMCU Freq: %.4f MHz",device.freq);
@@ -263,15 +267,28 @@ int main(int argc, char* argv[])
 			printf("\nUnknown device (%01x/%01x)!",
 				device.uid0,device.uid1);
 		}
+#ifdef MY1DEBUG
 		printf("\n[CHECK] ");
 		print_currtime(stdout);
-		//device.timeout_us = 500000;
+#endif
 		printf("\nInit handshake... ");
 		test = stc_handshake(&device,&cPort);
-		printf("done (%d){%d}",test,device.pcount);
-		printf("\nHandshake Packet: ");
+		if (!test) printf("success! {%02x}",device.flag);
+		else printf("error! (%d)",test);
+		printf("\nInit baud test... ");
+		test = stc_bauddance(&device,&cPort);
+		if (!test) printf("success! {%02x}",device.flag);
+		else printf("error! (%d)",test);
+		device.flag = PAYLOAD_BAUD_CONFIRM;
+		printf("\nDone baud test... ");
+		test = stc_bauddance(&device,&cPort);
+		if (!test) printf("success! {%02x}",device.flag);
+		else printf("error! (%d)",test);
+#if 1
+		printf("\nPrevious Packet: ");
 		for(loop=0;loop<device.pcount;loop++)
-			printf("[%02X]",device.packet[loop]);
+			printf("[%02x]",device.packet[loop]);
+#endif
 	}
 	else printf("error? (%d)",test);
 	putchar('\n');

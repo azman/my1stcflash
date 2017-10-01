@@ -22,6 +22,7 @@
 #define STC_PACKET_ME 0x16
 #define STC_PACKET_HOST2MCU 0x6a
 #define STC_PACKET_MCU2HOST 0x68
+#define STC_PACKET_DATA_OFFSET 5
 /*----------------------------------------------------------------------------*/
 #define STC_PACKET_VALID 0
 #define STC_PACKET_ERROR_BEGMARK 1
@@ -65,13 +66,15 @@ stc_payload_info_t;
 #define PAYLOAD_INFO_OFFSET_VER2 0x12
 #define PAYLOAD_INFO_OFFSET_MID1 0x14
 #define PAYLOAD_INFO_OFFSET_MID2 0x15
+#define PAYLOAD_HANDSHAKE_ID 0x8f
+#define PAYLOAD_BAUD_CONFIRM 0x8e
 /*----------------------------------------------------------------------------*/
 #define STC_DEVICE_12C5A60S2_MID1 0xd1
 #define STC_DEVICE_12C5A60S2_MID2 0x7e
 /*----------------------------------------------------------------------------*/
 typedef struct _stc_dev_t
 {
-	int timeout_us; /* timeout in microsecond resolution */
+	int timeout_us, error;
 	int pcount;
 	unsigned char packet[STC_PACKET_SIZE];
 	stc_packet_t info;
@@ -84,6 +87,7 @@ stc_dev_t;
 int stc_check_isp(stc_dev_t* pdevice, serial_port_t* pport);
 int stc_check_info(stc_dev_t* pdevice);
 int stc_handshake(stc_dev_t* pdevice, serial_port_t* pport);
+int stc_bauddance(stc_dev_t* pdevice, serial_port_t* pport);
 /*----------------------------------------------------------------------------*/
 #endif
 /*----------------------------------------------------------------------------*/
