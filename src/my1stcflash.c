@@ -40,13 +40,14 @@ stcmcu_t;
 /*----------------------------------------------------------------------------*/
 void about(void)
 {
-	printf("Use:\n  %s [options] [command]\n",PROGNAME);
+	printf("\nUse:\n  %s [options] [command]\n",PROGNAME);
 	printf("Options are:\n");
 	printf("  --help      : show this message. overrides other options.\n");
 	printf("  --port []   : specify port number between 1-%d.\n",MAX_COM_PORT);
 	printf("  --baud []   : baudrate e.g. 9600(default),38400,115200.\n");
 	printf("  --file []   : specify programming file.\n");
 	printf("  --tty []    : specify name for device (useful on Linux)\n");
+	printf("  --time []   : specify serial time out (microseconds)\n");
 	printf("Commands are:\n");
 	printf("  scan   : Scan for available serial port.\n");
 	printf("\n");
@@ -356,6 +357,10 @@ int fill_memorybin(memorybin_t* mem, linehex_t* hex)
 		posp = hex->lastaddr-mem->nextaddr+1;
 		if (posp<0) posp = 0;
 	}
+#if 0
+	printf("\n[CHECK] Init:%04x,Next:%04x,Size:%04x,Addr:%04x,Step:%04x",
+		mem->initaddr,mem->nextaddr,mem->datasize,hex->address,hex->count);
+#endif
 	/* need to resize? */
 	if (posp>0)
 	{
@@ -371,6 +376,8 @@ int fill_memorybin(memorybin_t* mem, linehex_t* hex)
 		/* prepend zero-pad? */
 		for (loop=0,addr=0;loop<prep;loop++)
 			mem->data[addr++] = 0;
+		if (mem->initaddr<0) mem->initaddr = 0;
+		mem->nextaddr = size;
 	}
 	/* copy in data */
 	addr = hex->address;
@@ -397,6 +404,7 @@ int hex2_memorybin(memorybin_t* mem,char* filename)
 				/* point the error and continue? */
 				break;
 			}
+			if (temp) break; /* type 0x01 end of file found! */
 			temp = fill_memorybin(mem,&linehex);
 			if (temp<0)
 			{
@@ -417,6 +425,7 @@ int main(int argc, char* argv[])
 	ASerialPort_t cPort;
 	ASerialConf_t cConf;
 	int loop, test, temp, port=1, baudrate = 0;
+	int time_out = STC_SYNC_TIMEOUT_US;
 	int do_command = COMMAND_NONE;
 	char *pfile = 0x0, *ptty = 0x0, *plist = 0x0;
 	char dlist[] = DEFAULT_MCUDB;
@@ -468,6 +477,15 @@ int main(int argc, char* argv[])
 					continue;
 				}
 			}
+			else if(!strcmp(argv[loop],"--time"))
+			{
+				if(get_param_int(argc,argv,&loop,&test)<0)
+				{
+					printf("Cannot get baud rate!\n\n");
+					return ERROR_PARAM_BAUD;
+				}
+				time_out = test;
+			}
 			else if(!strcmp(argv[loop],"--file"))
 			{
 				if(!(pfile=get_param_str(argc,argv,&loop)))
@@ -505,12 +523,14 @@ int main(int argc, char* argv[])
 	init_memorybin(&memory);
 	if (pfile)
 	{
-		printf("\nLoading code HEX file... ");
+		printf("Loading code HEX file... ");
 		temp = hex2_memorybin(&memory, pfile);
 		if (temp<0)
-			printf("fail! (%d)",temp);
-		else
-			printf("done! (%d)",memory.datasize);
+		{
+			printf("fail! (%d)\n",temp);
+			return ERROR_GENERAL;
+		}
+		printf("done! (%d)\n",memory.datasize);
 	}
 
 	/** initialize port */
@@ -561,10 +581,20 @@ int main(int argc, char* argv[])
 	}
 	cConf.mParity = MY1PARITY_EVEN; /** stc12 uses this! */
 
+	/** set the desired config */
+	set_serialconfig(&cPort,&cConf);
+
 	/* device interface configuration */
-	device.timeout_us = STC_SYNC_TIMEOUT_US;
+	device.timeout_us = time_out;
 	device.error = 0;
+	device.baudr = get_actual_baudrate(cConf.mBaudRate);
 	device.label[0] = 0x0;
+	device.data = 0x0;
+	if (pfile)
+	{
+		device.datasize = memory.datasize;
+		device.data = memory.data;
+	}
 
 	/** load mcu db! */
 	list_setup(&mcudb,LIST_TYPE_QUEUE);
@@ -572,9 +602,6 @@ int main(int argc, char* argv[])
 	printf("\nLoading device database... ");
 	get_device_list(plist, &mcudb);
 	printf("done! (%d)",mcudb.count);
-
-	/** set the desired config */
-	set_serialconfig(&cPort,&cConf);
 
 	/** try to open port */
 	if(!open_serial(&cPort))
@@ -597,6 +624,7 @@ int main(int argc, char* argv[])
 		printf("\n[CHECK] ");
 		print_currtime(stdout);
 #endif
+		printf("\nBaudrate: %d",device.baudr);
 		if (find_devinfo(&device,&mcudb)<0)
 		{
 			printf("\nUnknown device (%01x/%01x)!",
@@ -618,28 +646,33 @@ int main(int argc, char* argv[])
 		printf("\nInit handshake... ");
 		test = stc_handshake(&device,&cPort);
 		if (!test) printf("success! {%02x}",device.flag);
-		else printf("error! (%d)",test);
+		else { printf("error! (%d)\n",test); exit(1); }
 		printf("\nInit baud test... ");
 		test = stc_bauddance(&device,&cPort);
 		if (!test) printf("success! {%02x}",device.flag);
-		else printf("error! (%d)",test);
+		else { printf("error! (%d)\n",test); exit(1); }
 		device.flag = PAYLOAD_BAUD_CONFIRM;
 		printf("\nDone baud test... ");
 		test = stc_bauddance(&device,&cPort);
 		if (!test) printf("success! {%02x}",device.flag);
-		else printf("error! (%d)",test);
+		else { printf("error! (%d)\n",test); exit(1); }
 		/* continue only if we are flashing */
 		if (pfile)
 		{
-			printf("\nErase flash   ... ");
+			printf("\nErase memory... ");
 			test = stc_erase_mem(&device,&cPort);
 			if (!test) printf("success! {%02x}",device.flag);
-			else printf("error! (%d)",test);
-#if 1
+			else { printf("error! (%d)\n",test); exit(1); }
+			printf("\nFlash memory... ");
+			test = stc_flash_mem(&device,&cPort);
+			if (!test) printf("success! {%02x}",device.flag);
+			else { printf("error! (%d)\n",test); }
+#if 0
 			printf("\nPrevious Packet: ");
 			for(loop=0;loop<device.pcount;loop++)
 				printf("[%02x]",device.packet[loop]);
 #endif
+			printf("\nSetting Options Not Supported!");
 		}
 	}
 	else printf("error? (%d)",test);

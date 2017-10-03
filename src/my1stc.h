@@ -5,7 +5,7 @@
 #include "my1comlib.h"
 /*----------------------------------------------------------------------------*/
 #define STC_SYNC_CHAR 0x7f
-#define STC_SYNC_TIMEOUT_US 150000
+#define STC_SYNC_TIMEOUT_US 200000
 #define STC_SYNC_INIT -2
 #define STC_SYNC_MISS -1
 #define STC_SYNC_VERR -3
@@ -71,13 +71,16 @@ stc_payload_info_t;
 #define PAYLOAD_HANDSHAKE_ID 0x8f
 #define PAYLOAD_BAUD_CONFIRM 0x8e
 #define PAYLOAD_ERASE_MEMORY 0x84
+#define PAYLOAD_FLASH_MEMORY 0x00
+#define PAYLOAD_FLASH_FINISH 0x69
 /*----------------------------------------------------------------------------*/
 #define STC_DEVICE_NAME_LEN 16
 #define STC_FLASH_BLOCK_SIZE 128
+#define STC_FLASH_BLOCK_SIZE_PHYSICAL 512
 /*----------------------------------------------------------------------------*/
 typedef struct _stc_dev_t
 {
-	int timeout_us, error;
+	int timeout_us, error, baudr;
 	int pcount;
 	unsigned char packet[STC_PACKET_SIZE];
 	stc_packet_t info;
@@ -86,7 +89,9 @@ typedef struct _stc_dev_t
 	int fw11, fw12, fw20;
 	int fmemsize, ememsize; /* flash size & eeprom size */
 	float freq;
-	char *phex;
+	/* flash data? */
+	int datasize;
+	unsigned char *data;
 }
 stc_dev_t;
 /*----------------------------------------------------------------------------*/

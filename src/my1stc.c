@@ -3,9 +3,11 @@
 #include "my1cons.h"
 #include <sys/time.h>
 /*----------------------------------------------------------------------------*/
+#define STC_FREQ_DIVCONST 7.0
+/*----------------------------------------------------------------------------*/
 int stc_wait_packet(stc_dev_t* pdevice, serial_port_t* pport)
 {
-	int temp;
+	int temp,size=0;
 	pdevice->pcount = 0;
 	while(1)
 	{
@@ -16,7 +18,14 @@ int stc_wait_packet(stc_dev_t* pdevice, serial_port_t* pport)
 			pdevice->packet[pdevice->pcount++] = (byte_t) temp;
 		else
 			break;
-		if (temp==STC_PACKET_ME) break; /* stop if we find end marker! */
+		if (pdevice->pcount>5)
+		{
+			if ((pdevice->pcount>=size+2)&&temp==STC_PACKET_ME) break;
+		}
+		else if (pdevice->pcount==5)
+		{
+			size = ((int)pdevice->packet[3]<<8) + pdevice->packet[4];
+		}
 	}
 	return temp==SERIAL_TIMEOUT?temp:pdevice->pcount;
 }
@@ -121,7 +130,8 @@ int stc_check_isp(stc_dev_t* pdevice, serial_port_t* pport)
 					pdevice->freq += (float)change_endian(info->sync[loop]);
 				pdevice->freq /= 8; /* get average */
 				/* formula from stcdude */
-				pdevice->freq = (pdevice->freq * 9600 * 12)/(7*1000000);
+				pdevice->freq = (pdevice->freq*pdevice->baudr*12)/
+					(STC_FREQ_DIVCONST*1000000);
 				pdevice->uid0 = info->mid[0];
 				pdevice->uid1 = info->mid[1];
 				pdevice->fw11 = info->ver1;
@@ -170,6 +180,7 @@ int stc_packet_pack(stc_dev_t* pdevice, unsigned char* pdata, int dsize)
 #define STC_PACKET_USER_ABORT -2
 #define STC_PACKET_VALIDATE_ERROR -3
 #define STC_PACKET_HANDSHAKE_ERROR -4
+#define STC_PACKET_FLASH_ERROR -5
 /*----------------------------------------------------------------------------*/
 int stc_packet_send(stc_dev_t* pdevice, serial_port_t* pport)
 {
@@ -177,8 +188,10 @@ int stc_packet_send(stc_dev_t* pdevice, serial_port_t* pport)
 	int loop, test = 0;
 	for (loop=0;loop<pdevice->pcount;loop++)
 	{
+#if 0
 #include <stdio.h>
 		printf("[%02x]",pdevice->packet[loop]);
+#endif
 		put_byte_serial(pport,pdevice->packet[loop]);
 	}
 	while(1)
@@ -226,8 +239,9 @@ sample_rate = 16 (6T) or 32
 brt = 65536 - round((freq)/(baudrate*sample_rate))
 brt_csum = (2*(256-brt))&0xff
 */
-	unsigned char baud = 0xb8; /* 11.0592MHz, 6T mode */
-	unsigned char bsum = 0x90;
+	int test = -((pdevice->freq*1000000)/(pdevice->baudr*16));
+	unsigned char baud = test&0xff;
+	unsigned char bsum = (2*(256-(int)baud))&0xff;
 	unsigned char dlay = 0x80; /* stc-isp=>0xa0, stc-gal=>0x40 */
 	unsigned char iapw = 0x83; /* iap wait register? */
 	unsigned char data[] = { pdevice->flag,0xc0,baud,0x3f,bsum,dlay,iapw };
@@ -250,6 +264,7 @@ int stc_erase_mem(stc_dev_t* pdevice, serial_port_t* pport)
 	unsigned char size = pdevice->fmemsize*1024/256; /* number of blocks */
 	unsigned char step = 0x80;
 	unsigned char data[ERASE_COMMAND_SIZE];
+	/* blks & size should be 512-byte aligned (physical size) */
 	/* create data */
 	data[0] = PAYLOAD_ERASE_MEMORY;
 	for (loop=1;loop<19;loop++)
@@ -269,6 +284,63 @@ int stc_erase_mem(stc_dev_t* pdevice, serial_port_t* pport)
 	if (!stc_packet_send(pdevice,pport))
 	{
 		pdevice->flag = pdevice->info.pdata[PAYLOAD_INFO_OFFSET_FLAG];
+	}
+	return pdevice->error;
+}
+/*----------------------------------------------------------------------------*/
+int stc_flash_mem(stc_dev_t* pdevice, serial_port_t* pport)
+{
+	int loop, next = 0, step, size = STC_FLASH_BLOCK_SIZE_PHYSICAL;
+	unsigned char data[STC_PACKET_SIZE], csum;
+	/* make sure data size is aligned to flash block size */
+	while (size<pdevice->datasize)
+		size += STC_FLASH_BLOCK_SIZE_PHYSICAL;
+	/* send in 'packets' */
+	while (size>0)
+	{
+		/* create data */
+		data[0] = PAYLOAD_FLASH_MEMORY;
+		data[1] = 0x00;
+		data[2] = 0x00;
+		data[3] = ((next&0xff00)>>8)&0xff;
+		data[4] = next&0xff;
+		data[5] = 0x00; /* sizeh */
+		data[6] = STC_FLASH_BLOCK_SIZE; /* sizel */
+		/* copy data */
+		csum = 0x00;
+		for (loop=0,step=7;loop<STC_FLASH_BLOCK_SIZE;loop++,step++,next++)
+		{
+			if (next<pdevice->datasize)
+				data[step] = pdevice->data[next];
+			else
+				data[step] = 0x00; /* zero-pad */
+			csum += data[step];
+		}
+		/* form packet */
+		stc_packet_pack(pdevice,data,step);
+		/* send packet */
+		if (!stc_packet_send(pdevice,pport))
+			pdevice->flag = pdevice->info.pdata[PAYLOAD_INFO_OFFSET_FLAG];
+		else break;
+		/* do checksum? */
+		if ((int)pdevice->info.pdata[1]!=csum)
+		{
+			pdevice->error = STC_PACKET_FLASH_ERROR;
+			break;
+		}
+		size -= STC_FLASH_BLOCK_SIZE;
+	}
+	/* finish-up if there is no error! */
+	if (!pdevice->error)
+	{
+		unsigned char data[] = { PAYLOAD_FLASH_FINISH, 0x00, 0x00, 0x36, 0x01,
+			(unsigned char)(pdevice->uid0&0xff),
+			(unsigned char)(pdevice->uid1&0xff)};
+		/* form packet */
+		stc_packet_pack(pdevice,data,sizeof(data));
+		/* send packet */
+		if (!stc_packet_send(pdevice,pport))
+			pdevice->flag = pdevice->info.pdata[PAYLOAD_INFO_OFFSET_FLAG];
 	}
 	return pdevice->error;
 }
