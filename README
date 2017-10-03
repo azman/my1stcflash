@@ -6,7 +6,9 @@ Written by Azman M. Yusof (azman@my1matrix.net)
 
 A cross-platform console-based flash tool for STC-51 microcontrollers.
 
-This software requires my1termu project for serial port interface module.
-Basic console interface codes are also provided by my1termu.
+This software requires my1termu project for serial port interface module, and
+my1codelib for simple text-file access. Basic console interface codes are also
+provided by my1termu.
 
-I got most information from stcdude (deprecated) and stcgal projects.
+I got most information on STC bootloader interface from stcdude (deprecated)
+and stcgal projects.

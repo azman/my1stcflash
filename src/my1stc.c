@@ -1,9 +1,6 @@
 /*----------------------------------------------------------------------------*/
 #include "my1stc.h"
 #include "my1cons.h"
-//#include <stdio.h>
-//#include <stdlib.h>
-//#include <string.h>
 #include <sys/time.h>
 /*----------------------------------------------------------------------------*/
 int stc_wait_packet(stc_dev_t* pdevice, serial_port_t* pport)
@@ -24,47 +21,6 @@ int stc_wait_packet(stc_dev_t* pdevice, serial_port_t* pport)
 	return temp==SERIAL_TIMEOUT?temp:pdevice->pcount;
 }
 /*----------------------------------------------------------------------------*/
-int stc_check_isp(stc_dev_t* pdevice, serial_port_t* pport)
-{
-	struct timeval inittime, currtime;
-	my1key_t key;
-	int do_wait = 0;
-	int status = STC_SYNC_INIT;
-	while(status<STC_SYNC_DONE)
-	{
-		if(!do_wait)
-		{
-			put_byte_serial(pport,STC_SYNC_CHAR);
-			gettimeofday(&inittime,0x0);
-			do_wait = 1;
-		}
-		else
-		{
-			/* gettimeofday is using micro-second resolution! */
-			gettimeofday(&currtime,0x0);
-			if((currtime.tv_sec>inittime.tv_sec)||
-				(currtime.tv_usec-inittime.tv_usec)>pdevice->timeout_us)
-			{
-				do_wait = 0;
-			}
-		}
-		if(check_incoming(pport))
-		{
-			if (stc_wait_packet(pdevice,pport)==SERIAL_TIMEOUT)
-				status = STC_SYNC_MISS;
-			else
-				status = STC_SYNC_DONE;
-			break;
-		}
-		key = get_keyhit();
-		if(key==KEY_ESCAPE)
-			status = STC_SYNC_NONE;
-		else if(key==KEY_BSPACE)
-			status = STC_SYNC_REST;
-	}
-	return status;
-}
-/*----------------------------------------------------------------------------*/
 unsigned short stc_generate_chksum(stc_dev_t* pdevice)
 {
 	int loop;
@@ -72,13 +28,6 @@ unsigned short stc_generate_chksum(stc_dev_t* pdevice)
 	for(loop=2;loop<pdevice->pcount-3;loop++)
 		csum += pdevice->packet[loop];
 	return csum;
-}
-/*----------------------------------------------------------------------------*/
-unsigned short change_endian(unsigned short test)
-{
-	unsigned char *byte = (unsigned char*) &test;
-	unsigned short swap = byte[0];
-	return (swap<<8)|byte[1];
 }
 /*----------------------------------------------------------------------------*/
 int stc_validate_packet(stc_dev_t* pdevice)
@@ -119,42 +68,77 @@ int stc_validate_packet(stc_dev_t* pdevice)
 		test = STC_PACKET_ERROR_ENDMARK;
 	else if (pdevice->info.cksum!=stc_generate_chksum(pdevice))
 		test = STC_PACKET_ERROR_CHECKSUM;
+	/* update error flag */
+	pdevice->error = test;
 	return test;
 }
 /*----------------------------------------------------------------------------*/
-int stc_check_info(stc_dev_t* pdevice)
+unsigned short change_endian(unsigned short test)
 {
-	int loop, test = stc_validate_packet(pdevice);
-	if (test==STC_PACKET_VALID)
+	unsigned char *byte = (unsigned char*) &test;
+	unsigned short swap = byte[0];
+	return (swap<<8)|byte[1];
+}
+/*----------------------------------------------------------------------------*/
+int stc_check_isp(stc_dev_t* pdevice, serial_port_t* pport)
+{
+	struct timeval inittime, currtime;
+	my1key_t key;
+	int do_wait = 0, loop;
+	int status = STC_SYNC_INIT;
+	while(status<STC_SYNC_DONE)
 	{
-		stc_payload_info_t *info = (stc_payload_info_t*) pdevice->info.pdata;
-		//pdevice->flag = pdevice->info.pdata[PAYLOAD_INFO_OFFSET_FLAG];
-		pdevice->flag = info->flag;
-		pdevice->freq = 0.0;
-		//unsigned char *byte = &pdevice->info.pdata[PAYLOAD_INFO_OFFSET_SYNC];
-		for (loop=0;loop<8;loop++)
+		if(!do_wait)
 		{
-			//temp = (int)(byte[0])<<8;
-			//temp |= (int)(byte[1]);
-			//pdevice->freq += (float)temp;
-			pdevice->freq += (float)change_endian(info->sync[loop]);
-			//byte++; byte++;
+			put_byte_serial(pport,STC_SYNC_CHAR);
+			gettimeofday(&inittime,0x0);
+			do_wait = 1;
 		}
-		pdevice->freq /= 8; /* get average */
-		/* formula from stcdude */
-		pdevice->freq = (pdevice->freq * 9600 * 12)/(7*1000000);
-		//pdevice->uid0 = pdevice->info.pdata[PAYLOAD_INFO_OFFSET_MID1];
-		//pdevice->uid1 = pdevice->info.pdata[PAYLOAD_INFO_OFFSET_MID2];
-		pdevice->uid0 = info->mid[0];
-		pdevice->uid1 = info->mid[1];
-		//pdevice->fw11 = pdevice->info.pdata[PAYLOAD_INFO_OFFSET_VER1];
-		pdevice->fw11 = info->ver1;
-		pdevice->fw12 = (pdevice->fw11&0x0f);
-		pdevice->fw11 = (pdevice->fw11&0xf0)>>4;
-		//pdevice->fw20 = pdevice->info.pdata[PAYLOAD_INFO_OFFSET_VER2];
-		pdevice->fw20 = info->ver2;
+		else
+		{
+			/* gettimeofday is using micro-second resolution! */
+			gettimeofday(&currtime,0x0);
+			if((currtime.tv_sec>inittime.tv_sec)||
+				(currtime.tv_usec-inittime.tv_usec)>pdevice->timeout_us)
+			{
+				do_wait = 0;
+			}
+		}
+		if(check_incoming(pport))
+		{
+			if (stc_wait_packet(pdevice,pport)==SERIAL_TIMEOUT)
+				status = STC_SYNC_MISS;
+			else if (stc_validate_packet(pdevice)!=STC_PACKET_VALID)
+				status = STC_SYNC_VERR;
+			else
+			{
+				stc_payload_info_t *info =
+					(stc_payload_info_t*) pdevice->info.pdata;
+				pdevice->flag = info->flag;
+				/* calculate frequency */
+				pdevice->freq = 0.0;
+				for (loop=0;loop<8;loop++)
+					pdevice->freq += (float)change_endian(info->sync[loop]);
+				pdevice->freq /= 8; /* get average */
+				/* formula from stcdude */
+				pdevice->freq = (pdevice->freq * 9600 * 12)/(7*1000000);
+				pdevice->uid0 = info->mid[0];
+				pdevice->uid1 = info->mid[1];
+				pdevice->fw11 = info->ver1;
+				pdevice->fw12 = (pdevice->fw11&0x0f);
+				pdevice->fw11 = (pdevice->fw11&0xf0)>>4;
+				pdevice->fw20 = info->ver2;
+				status = STC_SYNC_DONE;
+			}
+			break;
+		}
+		key = get_keyhit();
+		if(key==KEY_ESCAPE)
+			status = STC_SYNC_NONE;
+		else if(key==KEY_BSPACE)
+			status = STC_SYNC_REST;
 	}
-	return test;
+	return status;
 }
 /*----------------------------------------------------------------------------*/
 int stc_packet_pack(stc_dev_t* pdevice, unsigned char* pdata, int dsize)
@@ -247,6 +231,38 @@ brt_csum = (2*(256-brt))&0xff
 	unsigned char dlay = 0x80; /* stc-isp=>0xa0, stc-gal=>0x40 */
 	unsigned char iapw = 0x83; /* iap wait register? */
 	unsigned char data[] = { pdevice->flag,0xc0,baud,0x3f,bsum,dlay,iapw };
+	/* form packet */
+	stc_packet_pack(pdevice,data,sizeof(data));
+	/* send packet */
+	if (!stc_packet_send(pdevice,pport))
+	{
+		pdevice->flag = pdevice->info.pdata[PAYLOAD_INFO_OFFSET_FLAG];
+	}
+	return pdevice->error;
+}
+/*----------------------------------------------------------------------------*/
+#define ERASE_COMMAND_SIZE (7+12+128-(14-1))
+/*----------------------------------------------------------------------------*/
+int stc_erase_mem(stc_dev_t* pdevice, serial_port_t* pport)
+{
+	int loop;
+	unsigned char blks = pdevice->fmemsize*1024/256; /* blocks to erase */
+	unsigned char size = pdevice->fmemsize*1024/256; /* number of blocks */
+	unsigned char step = 0x80;
+	unsigned char data[ERASE_COMMAND_SIZE];
+	/* create data */
+	data[0] = PAYLOAD_ERASE_MEMORY;
+	for (loop=1;loop<19;loop++)
+	{
+		switch (loop)
+		{
+			case 3: data[loop] = blks; break;
+			case 6: data[loop] = size; break;
+			default: data[loop] = 0; break;
+		}
+	}
+	for (loop=19;loop<ERASE_COMMAND_SIZE;loop++,step--)
+		data[loop] = step;
 	/* form packet */
 	stc_packet_pack(pdevice,data,sizeof(data));
 	/* send packet */

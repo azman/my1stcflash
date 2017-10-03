@@ -1,23 +1,19 @@
 /*----------------------------------------------------------------------------*/
 #include "my1comlib.h"
 #include "my1cons.h"
+#include "my1text.h"
+#include "my1list.h"
 #include "my1stc.h"
 /*----------------------------------------------------------------------------*/
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
 /*----------------------------------------------------------------------------*/
 #define PROGNAME "my1stcflash"
 /*----------------------------------------------------------------------------*/
-#define NXP_FIND_WAIT 10000
-/*----------------------------------------------------------------------------*/
 #define COMMAND_NONE 0
 #define COMMAND_SCAN 1
-#define COMMAND_DEVICE 2
-#define COMMAND_BCHECK 3
-#define COMMAND_ERASE 4
-#define COMMAND_WRITE 5
-#define COMMAND_VERIFY 6
 /*----------------------------------------------------------------------------*/
 #define ERROR_GENERAL -1
 #define ERROR_USER_ABORT -2
@@ -29,9 +25,18 @@
 #define ERROR_MULTI_CMD -8
 #define ERROR_NO_COMMAND -9
 #define ERROR_NO_HEXFILE -10
-#define ERROR_NO_DEVICE -11
 /*----------------------------------------------------------------------------*/
 #define FILENAME_LEN 80
+/*----------------------------------------------------------------------------*/
+#define DEFAULT_MCUDB "my1stc-mcudb.txt"
+/*----------------------------------------------------------------------------*/
+typedef struct _stcmcu_t
+{
+	int uid0, uid1;
+	char label[STC_DEVICE_NAME_LEN];
+	int fmsz, emsz, flag;
+}
+stcmcu_t;
 /*----------------------------------------------------------------------------*/
 void about(void)
 {
@@ -42,16 +47,8 @@ void about(void)
 	printf("  --baud []   : baudrate e.g. 9600(default),38400,115200.\n");
 	printf("  --file []   : specify programming file.\n");
 	printf("  --tty []    : specify name for device (useful on Linux)\n");
-	printf("  --device [] : specify NXP device (not used for now).\n");
-	printf("  --no-device : just as a general terminal.\n");
-	printf("  --force     : force erase even when device is blank.\n");
 	printf("Commands are:\n");
 	printf("  scan   : Scan for available serial port.\n");
-	printf("  info   : Display device information.\n");
-	printf("  bcheck : Blank check device.\n");
-	printf("  erase  : Erase device.\n");
-	printf("  write  : Write HEX file to device.\n");
-	printf("  verify : Verify HEX file on device.\n");
 	printf("\n");
 }
 /*----------------------------------------------------------------------------*/
@@ -100,14 +97,332 @@ void print_currtime(FILE* pfile)
 	fprintf(pfile,"[%20.6lf]",test);
 }
 /*----------------------------------------------------------------------------*/
+char is_whitespace(char achar)
+{
+	switch(achar)
+	{
+		case ' ':
+		case '\t':
+			break;
+		default:
+			achar = 0x0;
+	}
+	return achar;
+}
+/*----------------------------------------------------------------------------*/
+#define MCUDB_DELIM " ,\t"
+/*----------------------------------------------------------------------------*/
+int get_device_list(char* filename, my1list* list)
+{
+	char *ibuff, *tbuff, *pbuff;
+	stcmcu_t temp;
+	my1text text;
+	text_init(&text);
+	text_open(&text,filename);
+	if (text.pfile)
+	{
+		while (text_read(&text)==CHAR_INIT)
+		{
+			//printf("Line %03d: %s\n",text.iline,text.pbuff);
+			/* skip whitespace to check 'empty' lines */
+			ibuff = text.pbuff;
+			while(is_whitespace(*ibuff)) ibuff++;
+			/* skip if empty lines! also ignore comments? */
+			if(ibuff[0]=='\0'||ibuff[0]=='#')
+				continue;
+			/* create separate token processing buffer */
+			tbuff = (char*) malloc(text.count);
+			strcpy(tbuff,ibuff);
+			/* break down main line components */
+			temp.flag = 0;
+			do
+			{
+				/* check if there is a comment */
+				pbuff = strchr(tbuff,'#');
+				if(pbuff) pbuff[0] = 0x0; /* end at comment! */
+				/* look for mcu id1 */
+				pbuff = strtok(tbuff,MCUDB_DELIM);
+				if (!pbuff) break;
+				sscanf(pbuff,"%x",&temp.uid0);
+				/* look for mcu id2 */
+				pbuff = strtok(0x0,MCUDB_DELIM);
+				if (!pbuff) break;
+				sscanf(pbuff,"%x",&temp.uid1);
+				/* look for mcu name */
+				pbuff = strtok(0x0,MCUDB_DELIM);
+				if (!pbuff) break;
+				sscanf(pbuff,"%s",temp.label);
+				/* look for mcu flash size */
+				pbuff = strtok(0x0,MCUDB_DELIM);
+				if (!pbuff) break;
+				sscanf(pbuff,"%d",&temp.fmsz);
+				/* look for mcu eeprom size */
+				pbuff = strtok(0x0,MCUDB_DELIM);
+				if (!pbuff) break;
+				sscanf(pbuff,"%d",&temp.emsz);
+				temp.flag = 1;
+			}
+			while(0);
+			/* create list item if valid */
+			if (temp.flag)
+			{
+				stcmcu_t *item = (stcmcu_t *) malloc(sizeof(stcmcu_t));
+				memcpy((void*)item,(void*)&temp,sizeof(stcmcu_t));
+				list_push_item(list,(void*)item);
+			}
+			/* release text buffer */
+			free((void*)tbuff);
+		}
+		text_done(&text);
+	}
+	text_free(&text);
+	return list->count;
+}
+/*----------------------------------------------------------------------------*/
+int find_devinfo(stc_dev_t* pdevice, my1list* list)
+{
+	int index = -1;
+	list->curr = 0x0;
+	while (list_iterate(list))
+	{
+		index++;
+		stcmcu_t *item = (stcmcu_t *) list->curr->item;
+		if (item->uid0==pdevice->uid0&&item->uid1==pdevice->uid1)
+		{
+			strcpy(pdevice->label,item->label);
+			pdevice->fmemsize = item->fmsz;
+			pdevice->ememsize = item->emsz;
+			break;
+		}
+	}
+	return index;
+}
+/*----------------------------------------------------------------------------*/
+#define MAX_HEX_DATA_BYTE 32
+#define COUNT_HEXSTR_BYTE (1+2+1+MAX_HEX_DATA_BYTE+1)
+#define COUNT_HEXSTR_CHAR (1+COUNT_HEXSTR_BYTE*2+1)
+#define COUNT_HEXSTR_BUFF (COUNT_HEXSTR_CHAR+2)
+/*----------------------------------------------------------------------------*/
+#define HEX_ERROR_GENERAL -1
+#define HEX_ERROR_FILE -2
+#define HEX_ERROR_LENGTH -3
+#define HEX_ERROR_NOCOLON -4
+#define HEX_ERROR_NOTDATA -5
+#define HEX_ERROR_CHECKSUM -6
+#define HEX_ERROR_OVERFLOW -7
+#define HEX_ERROR_ACK -8
+#define HEX_ERROR_INVALID -9
+#define HEX_ERROR_SIZE -10
+#define HEX_ERROR_BINSIZE -11
+#define HEX_ERROR_MEMBIN -12
+/*----------------------------------------------------------------------------*/
+typedef struct _linehex
+{
+	unsigned int count, type;
+	unsigned int address;
+	unsigned int lastaddr;
+	unsigned int data[MAX_HEX_DATA_BYTE];
+	char hexstr[COUNT_HEXSTR_BUFF];
+}
+linehex_t;
+/*----------------------------------------------------------------------------*/
+int get_hexbyte(const char* hexbyte)
+{
+	int value;
+	char test[3] = { hexbyte[0], hexbyte[1], 0x0 };
+	sscanf(test,"%02X",&value);
+	return value&0xFF;
+}
+/*----------------------------------------------------------------------------*/
+int check_hex(char* hexstr, linehex_t* linehex)
+{
+	int length = 0, loop = 0, type;
+	int count, address, checksum, test, temp;
+	/* find length, filter newline! */
+	while(hexstr[length])
+	{
+		linehex->hexstr[length] = hexstr[length];
+		if(hexstr[length]=='\n'||hexstr[length]=='\r')
+		{
+			hexstr[length] = 0x0;
+			linehex->hexstr[length] = 0x0;
+			break;
+		}
+		length++;
+		if(length>COUNT_HEXSTR_CHAR)
+			return HEX_ERROR_LENGTH;
+	}
+	/* check valid length */
+	if(length<9)
+		return HEX_ERROR_LENGTH;
+	/* check first char */
+	if(hexstr[loop++]!=':')
+		return HEX_ERROR_NOCOLON;
+	/* get data count */
+	count = get_hexbyte(&hexstr[loop]);
+	checksum = count&0x0FF;
+	if (count>MAX_HEX_DATA_BYTE)
+		return HEX_ERROR_SIZE;
+	loop += 2;
+	/* get address - highbyte */
+	test = get_hexbyte(&hexstr[loop]);
+	checksum += test&0xFF;
+	loop += 2;
+	address = (test&0xFF)<<8;
+	/* get address - lowbyte */
+	test = get_hexbyte(&hexstr[loop]);
+	checksum += test&0xFF;
+	loop += 2;
+	address |= (test&0xFF);
+	/* get record type for checksum calc */
+	type = get_hexbyte(&hexstr[loop]);
+	checksum += type&0xFF;
+	loop += 2;
+	/* check EOF type? */
+	if(type!=0x00&&type!=0x01)
+		return HEX_ERROR_NOTDATA;
+	/* save data if requested */
+	if(linehex)
+	{
+		linehex->count = count;
+		linehex->type = type;
+		linehex->address = address;
+		linehex->lastaddr = address + count - 1 + type; /* count=0 @ type=1! */
+	}
+	/* get data */
+	for(temp=0;temp<count;temp++)
+	{
+		if(loop>=(length-2))
+			return HEX_ERROR_LENGTH;
+		test = get_hexbyte(&hexstr[loop]);
+		if(linehex)
+			linehex->data[temp] = test&0xFF;
+		checksum += test&0xFF;
+		loop += 2;
+	}
+	/* get checksum */
+	if(loop!=(length-2))
+		return HEX_ERROR_LENGTH;
+	test = get_hexbyte(&hexstr[loop]);
+	/* calculate and verify checksum */
+	checksum = ~checksum + 1;
+	if((test&0xFF)!=(checksum&0xFF))
+		return HEX_ERROR_CHECKSUM;
+	/* returns record type */
+	return type;
+}
+/*----------------------------------------------------------------------------*/
+#define MEMORYBIN_MAX 0x10000
+/*----------------------------------------------------------------------------*/
+typedef struct _memorybin_t
+{
+	int initaddr, nextaddr, datasize;
+	unsigned char* data;
+}
+memorybin_t;
+/*----------------------------------------------------------------------------*/
+void init_memorybin(memorybin_t* mem)
+{
+	mem->initaddr = -1;
+	mem->nextaddr = 0x0000;
+	mem->datasize = 0;
+	mem->data = 0x0;
+}
+/*----------------------------------------------------------------------------*/
+void free_memorybin(memorybin_t* mem)
+{
+	if (mem->data)
+	{
+		free((void*)mem->data);
+		mem->data = 0x0;
+	}
+	mem->datasize = 0;
+	mem->nextaddr = 0x0000;
+	mem->initaddr = -1;
+}
+/*----------------------------------------------------------------------------*/
+int fill_memorybin(memorybin_t* mem, linehex_t* hex)
+{
+	int size = mem->datasize, loop, addr, prep = 0, posp;
+	void *buff;
+	/* get non-overlapped space */
+	if (mem->initaddr<0)
+	{
+		prep = hex->address;
+		posp = prep + hex->count;
+	}
+	else
+	{
+		posp = hex->lastaddr-mem->nextaddr+1;
+		if (posp<0) posp = 0;
+	}
+	/* need to resize? */
+	if (posp>0)
+	{
+		size += posp;
+		if (size>MEMORYBIN_MAX)
+			return HEX_ERROR_BINSIZE;
+		buff = realloc(mem->data,size);
+		if (!buff)
+			return HEX_ERROR_MEMBIN;
+		/* assume always get same space? */
+		mem->data = (unsigned char*) buff;
+		mem->datasize = size;
+		/* prepend zero-pad? */
+		for (loop=0,addr=0;loop<prep;loop++)
+			mem->data[addr++] = 0;
+	}
+	/* copy in data */
+	addr = hex->address;
+	for (loop=0;loop<hex->count;loop++)
+		mem->data[addr++] = hex->data[loop];
+	return size;
+}
+/*----------------------------------------------------------------------------*/
+int hex2_memorybin(memorybin_t* mem,char* filename)
+{
+	int test = 0, temp;
+	linehex_t linehex;
+	my1text text;
+	text_init(&text);
+	text_open(&text,filename);
+	if (text.pfile)
+	{
+		while (text_read(&text)==CHAR_INIT)
+		{
+			temp = check_hex(text.pbuff,&linehex);
+			if (temp<0)
+			{
+				test = temp;
+				/* point the error and continue? */
+				break;
+			}
+			temp = fill_memorybin(mem,&linehex);
+			if (temp<0)
+			{
+				test = temp;
+				/* point the error and continue? */
+				break;
+			}
+		}
+		text_done(&text);
+	}
+	else test = HEX_ERROR_FILE;
+	text_free(&text);
+	return test;
+}
+/*----------------------------------------------------------------------------*/
 int main(int argc, char* argv[])
 {
 	ASerialPort_t cPort;
 	ASerialConf_t cConf;
-	int loop, test, port=1, baudrate = 0;
+	int loop, test, temp, port=1, baudrate = 0;
 	int do_command = COMMAND_NONE;
-	char *pfile = 0x0, *ptty = 0x0;
+	char *pfile = 0x0, *ptty = 0x0, *plist = 0x0;
+	char dlist[] = DEFAULT_MCUDB;
 	stc_dev_t device;
+	memorybin_t memory;
+	my1list mcudb;
 
 	/* print tool info */
 	printf("\n%s - STC Flash Tool (version %s)\n",PROGNAME,PROGVERS);
@@ -161,6 +476,14 @@ int main(int argc, char* argv[])
 					return ERROR_PARAM_FILE;
 				}
 			}
+			else if(!strcmp(argv[loop],"--list"))
+			{
+				if(!(plist=get_param_str(argc,argv,&loop)))
+				{
+					printf("Error getting listname!\n");
+					return ERROR_PARAM_FILE;
+				}
+			}
 			else if(!strcmp(argv[loop],"scan"))
 			{
 				if(do_command!=COMMAND_NONE)
@@ -176,6 +499,18 @@ int main(int argc, char* argv[])
 				printf("Unknown param '%s'!\n",argv[loop]);
 			}
 		}
+	}
+
+	/** load hex file if requested */
+	init_memorybin(&memory);
+	if (pfile)
+	{
+		printf("\nLoading code HEX file... ");
+		temp = hex2_memorybin(&memory, pfile);
+		if (temp<0)
+			printf("fail! (%d)",temp);
+		else
+			printf("done! (%d)",memory.datasize);
 	}
 
 	/** initialize port */
@@ -215,7 +550,8 @@ int main(int argc, char* argv[])
 			case 1200: cConf.mBaudRate = MY1BAUD1200; break;
 			case 2400: cConf.mBaudRate = MY1BAUD2400; break;
 			case 4800: cConf.mBaudRate = MY1BAUD4800; break;
-			default: printf("Invalid baudrate (%d)! Using default!\n", test);
+			default:
+				printf("Invalid baudrate (%d)! Using default!\n", baudrate);
 			case 9600: cConf.mBaudRate = MY1BAUD9600; break;
 			case 19200: cConf.mBaudRate = MY1BAUD19200; break;
 			case 38400: cConf.mBaudRate = MY1BAUD38400; break;
@@ -228,6 +564,14 @@ int main(int argc, char* argv[])
 	/* device interface configuration */
 	device.timeout_us = STC_SYNC_TIMEOUT_US;
 	device.error = 0;
+	device.label[0] = 0x0;
+
+	/** load mcu db! */
+	list_setup(&mcudb,LIST_TYPE_QUEUE);
+	if (!plist) plist = dlist;
+	printf("\nLoading device database... ");
+	get_device_list(plist, &mcudb);
+	printf("done! (%d)",mcudb.count);
 
 	/** set the desired config */
 	set_serialconfig(&cPort,&cConf);
@@ -246,27 +590,27 @@ int main(int argc, char* argv[])
 	/** start doing things */
 	printf("\nLooking for STC12 device... ");
 	test = stc_check_isp(&device,&cPort);
-
-	if (test==STC_SYNC_DONE&&stc_check_info(&device)==STC_PACKET_VALID)
+	if (test==STC_SYNC_DONE)
 	{
 		printf("found! ");
 #ifdef MY1DEBUG
 		printf("\n[CHECK] ");
 		print_currtime(stdout);
 #endif
-		printf("\nFirmware: %d.%d%c (Payload: 0x%02x)",
-				device.fw11,device.fw12,(char)device.fw20,device.flag);
-		printf("\nMCU Freq: %.4f MHz",device.freq);
-		if ((device.uid0==STC_DEVICE_12C5A60S2_MID1)&&
-			(device.uid1==STC_DEVICE_12C5A60S2_MID2))
-		{
-			printf("\nMCU Dev#: STC12C5A60S2");
-		}
-		else
+		if (find_devinfo(&device,&mcudb)<0)
 		{
 			printf("\nUnknown device (%01x/%01x)!",
 				device.uid0,device.uid1);
 		}
+		else
+		{
+			printf("\nMCU Dev#: %s",device.label);
+		}
+		printf("\nMCU Freq: %.4f MHz",device.freq);
+		printf("\nFirmware: %d.%d%c (Payload: 0x%02x)",
+				device.fw11,device.fw12,(char)device.fw20,device.flag);
+		printf("\nFlash  Size: %2d kB",device.fmemsize);
+		printf("\nEEPROM Size: %2d kB",device.ememsize);
 #ifdef MY1DEBUG
 		printf("\n[CHECK] ");
 		print_currtime(stdout);
@@ -284,14 +628,26 @@ int main(int argc, char* argv[])
 		test = stc_bauddance(&device,&cPort);
 		if (!test) printf("success! {%02x}",device.flag);
 		else printf("error! (%d)",test);
+		/* continue only if we are flashing */
+		if (pfile)
+		{
+			printf("\nErase flash   ... ");
+			test = stc_erase_mem(&device,&cPort);
+			if (!test) printf("success! {%02x}",device.flag);
+			else printf("error! (%d)",test);
 #if 1
-		printf("\nPrevious Packet: ");
-		for(loop=0;loop<device.pcount;loop++)
-			printf("[%02x]",device.packet[loop]);
+			printf("\nPrevious Packet: ");
+			for(loop=0;loop<device.pcount;loop++)
+				printf("[%02x]",device.packet[loop]);
 #endif
+		}
 	}
 	else printf("error? (%d)",test);
 	putchar('\n');
+
+	/** cleanup */
+	list_clean(&mcudb,&list_free_item);
+	free_memorybin(&memory);
 
 	/** we are done */
 	close_serial(&cPort);

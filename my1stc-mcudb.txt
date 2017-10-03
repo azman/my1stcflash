@@ -1,0 +1,2 @@
+# mcu-id1, mcu-id2, mcu-name, mcu-flash-size (kB), mcu-eeprom-size (kB)
+0xd1,0x7e,STC12C5A60S2,60,1

@@ -8,6 +8,7 @@
 #define STC_SYNC_TIMEOUT_US 150000
 #define STC_SYNC_INIT -2
 #define STC_SYNC_MISS -1
+#define STC_SYNC_VERR -3
 #define STC_SYNC_DONE 0
 #define STC_SYNC_NONE 1
 #define STC_SYNC_REST 2
@@ -25,11 +26,12 @@
 #define STC_PACKET_DATA_OFFSET 5
 /*----------------------------------------------------------------------------*/
 #define STC_PACKET_VALID 0
-#define STC_PACKET_ERROR_BEGMARK 1
-#define STC_PACKET_ERROR_ENDMARK 2
-#define STC_PACKET_ERROR_DIRECT 3
-#define STC_PACKET_ERROR_LENGTH 4
-#define STC_PACKET_ERROR_CHECKSUM 5
+#define STC_PACKET_ERROR -10
+#define STC_PACKET_ERROR_BEGMARK (STC_PACKET_ERROR-1)
+#define STC_PACKET_ERROR_ENDMARK (STC_PACKET_ERROR-2)
+#define STC_PACKET_ERROR_DIRECT (STC_PACKET_ERROR-3)
+#define STC_PACKET_ERROR_LENGTH (STC_PACKET_ERROR-4)
+#define STC_PACKET_ERROR_CHECKSUM (STC_PACKET_ERROR-5)
 /*----------------------------------------------------------------------------*/
 typedef struct _stc_packet_t
 {
@@ -68,9 +70,10 @@ stc_payload_info_t;
 #define PAYLOAD_INFO_OFFSET_MID2 0x15
 #define PAYLOAD_HANDSHAKE_ID 0x8f
 #define PAYLOAD_BAUD_CONFIRM 0x8e
+#define PAYLOAD_ERASE_MEMORY 0x84
 /*----------------------------------------------------------------------------*/
-#define STC_DEVICE_12C5A60S2_MID1 0xd1
-#define STC_DEVICE_12C5A60S2_MID2 0x7e
+#define STC_DEVICE_NAME_LEN 16
+#define STC_FLASH_BLOCK_SIZE 128
 /*----------------------------------------------------------------------------*/
 typedef struct _stc_dev_t
 {
@@ -79,15 +82,19 @@ typedef struct _stc_dev_t
 	unsigned char packet[STC_PACKET_SIZE];
 	stc_packet_t info;
 	int flag, uid0, uid1;
+	char label[STC_DEVICE_NAME_LEN];
 	int fw11, fw12, fw20;
+	int fmemsize, ememsize; /* flash size & eeprom size */
 	float freq;
+	char *phex;
 }
 stc_dev_t;
 /*----------------------------------------------------------------------------*/
 int stc_check_isp(stc_dev_t* pdevice, serial_port_t* pport);
-int stc_check_info(stc_dev_t* pdevice);
 int stc_handshake(stc_dev_t* pdevice, serial_port_t* pport);
 int stc_bauddance(stc_dev_t* pdevice, serial_port_t* pport);
+int stc_erase_mem(stc_dev_t* pdevice, serial_port_t* pport);
+int stc_flash_mem(stc_dev_t* pdevice, serial_port_t* pport);
 /*----------------------------------------------------------------------------*/
 #endif
 /*----------------------------------------------------------------------------*/
