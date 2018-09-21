@@ -3,8 +3,6 @@
 #include "my1cons.h"
 #include <sys/time.h>
 /*----------------------------------------------------------------------------*/
-#define STC_FREQ_DIVCONST 7.0
-/*----------------------------------------------------------------------------*/
 int stc_wait_packet(stc_dev_t* pdevice, serial_port_t* pport)
 {
 	int temp,size=0;
@@ -121,17 +119,47 @@ int stc_check_isp(stc_dev_t* pdevice, serial_port_t* pport)
 				status = STC_SYNC_VERR;
 			else
 			{
+				unsigned long test = 0;
 				stc_payload_info_t *info =
 					(stc_payload_info_t*) pdevice->info.pdata;
 				pdevice->flag = info->flag;
-				/* calculate frequency */
-				pdevice->freq = 0.0;
+				/* detect target frequency */
 				for (loop=0;loop<8;loop++)
-					pdevice->freq += (float)change_endian(info->sync[loop]);
-				pdevice->freq /= 8; /* get average */
-				/* formula from stcdude */
-				pdevice->freq = (pdevice->freq*pdevice->baudr*12)/
-					(STC_FREQ_DIVCONST*1000000);
+					test += (unsigned long)change_endian(info->sync[loop]);
+				test >>= 3; /* divide-by-8: get average */
+				test *= 1200; /* target minimum baudrate? */
+				test /= 5816; /* dunno why? */
+				if ((test%100)>=50) test = (test/100)+1;
+				else test /= 100;
+				switch (test)
+				{
+					case 24:
+						pdevice->freq = 24.000000; /* 24 mhz? */
+						break;
+					case 22:
+						pdevice->freq = 22.118400;
+						break;
+					case 16:
+						pdevice->freq = 16.000000;
+						break;
+					default:
+					case 12:
+						pdevice->freq = 12.000000;
+						break;
+					case 11:
+						pdevice->freq = 11.059200;
+						break;
+					case 8:
+						pdevice->freq = 8.000000;
+						break;
+					case 6:
+						pdevice->freq = 6.000000;
+						break;
+					case 4:
+						pdevice->freq = 4.000000;
+						break;
+				}
+				/* other stuff */
 				pdevice->uid0 = info->mid[0];
 				pdevice->uid1 = info->mid[1];
 				pdevice->fw11 = info->ver1;

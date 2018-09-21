@@ -480,7 +480,7 @@ int main(int argc, char* argv[])
 			{
 				if(get_param_int(argc,argv,&loop,&test)<0)
 				{
-					printf("Cannot get baud rate!\n\n");
+					printf("Cannot get timeout value!\n\n");
 					return ERROR_PARAM_BAUD;
 				}
 				time_out = test;
