@@ -122,9 +122,8 @@ int get_device_list(char* filename, my1list* list)
 	text_open(&text,filename);
 	if (text.pfile)
 	{
-		while (text_read(&text)==CHAR_INIT)
+		while (text_read(&text)>=CHAR_INIT)
 		{
-			//printf("Line %03d: %s\n",text.iline,text.pbuff);
 			/* skip whitespace to check 'empty' lines */
 			ibuff = text.pbuff;
 			while(is_whitespace(*ibuff)) ibuff++;
