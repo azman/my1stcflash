@@ -4,6 +4,7 @@
 #include "my1text.h"
 #include "my1list.h"
 #include "my1stc.h"
+#include "my1stc_db.h"
 /*----------------------------------------------------------------------------*/
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,15 +29,7 @@
 /*----------------------------------------------------------------------------*/
 #define FILENAME_LEN 80
 /*----------------------------------------------------------------------------*/
-#define DEFAULT_MCUDB "my1stc-mcudb.txt"
-/*----------------------------------------------------------------------------*/
-typedef struct _stcmcu_t
-{
-	int uid0, uid1;
-	char label[STC_DEVICE_NAME_LEN];
-	int fmsz, emsz, flag;
-}
-stcmcu_t;
+#define DEFAULT_MCUDB "stcmcudb.txt"
 /*----------------------------------------------------------------------------*/
 void about(void)
 {
@@ -113,11 +106,39 @@ char is_whitespace(char achar)
 /*----------------------------------------------------------------------------*/
 #define MCUDB_DELIM " ,\t"
 /*----------------------------------------------------------------------------*/
-int get_device_list(char* filename, my1list* list)
+int find_device_list(my1list* list,int uid0,int uid1)
+{
+	int index = -1, check = 0;
+	list->curr = 0x0;
+	while(list_iterate(list))
+	{
+		stcmcu_t *item = (stcmcu_t *) list->curr->item;
+		if (item->uid0==uid0&&item->uid1==uid1)
+		{
+			index = check;
+			break;
+		}
+		check++;
+	}
+	return index;
+}
+/*----------------------------------------------------------------------------*/
+int get_device_list(my1list* list,char* filename)
 {
 	char *ibuff, *tbuff, *pbuff;
 	stcmcu_t temp;
 	my1text text;
+	int loop;
+	/** load predefined devices */
+	for(loop=0;loop<STCMCU_DBSIZE;loop++)
+	{
+		if (find_device_list(list,
+			stcmcu_db[loop].uid0,stcmcu_db[loop].uid1)>=0) continue;
+		stcmcu_t *item = (stcmcu_t *) malloc(sizeof(stcmcu_t));
+		memcpy((void*)item,(void*)&stcmcu_db[loop],sizeof(stcmcu_t));
+		list_push_item(list,(void*)item);
+	}
+	/** try to open dynamic list */
 	text_init(&text);
 	text_open(&text,filename);
 	if (text.pfile)
@@ -166,6 +187,7 @@ int get_device_list(char* filename, my1list* list)
 			/* create list item if valid */
 			if (temp.flag)
 			{
+				if (find_device_list(list,temp.uid0,temp.uid1)>=0) continue;
 				stcmcu_t *item = (stcmcu_t *) malloc(sizeof(stcmcu_t));
 				memcpy((void*)item,(void*)&temp,sizeof(stcmcu_t));
 				list_push_item(list,(void*)item);
@@ -599,8 +621,18 @@ int main(int argc, char* argv[])
 	list_setup(&mcudb,LIST_TYPE_QUEUE);
 	if (!plist) plist = dlist;
 	printf("\nLoading device database... ");
-	get_device_list(plist, &mcudb);
+	get_device_list(&mcudb,plist);
 	printf("done! (%d)",mcudb.count);
+#ifdef MY1DEBUG
+	printf("\nDevice List:\n");
+	mcudb.curr = 0x0;
+	while(list_iterate(&mcudb))
+	{
+		stcmcu_t *item = (stcmcu_t *) mcudb.curr->item;
+		printf("{ID0:%d,ID1:%d} => %s\n",item->uid0,item->uid1,item->label);
+	}
+	printf("\n");
+#endif
 
 	/** try to open port */
 	if(!open_serial(&cPort))

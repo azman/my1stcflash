@@ -95,6 +95,15 @@ typedef struct _stc_dev_t
 }
 stc_dev_t;
 /*----------------------------------------------------------------------------*/
+/** mcu-id1, mcu-id2, mcu-name, mcu-flash-size (kB), mcu-eeprom-size (kB) */
+typedef struct _stcmcu_t
+{
+	int uid0, uid1;
+	char label[STC_DEVICE_NAME_LEN];
+	int fmsz, emsz, flag;
+}
+stcmcu_t;
+/*----------------------------------------------------------------------------*/
 int stc_check_isp(stc_dev_t* pdevice, serial_port_t* pport);
 int stc_handshake(stc_dev_t* pdevice, serial_port_t* pport);
 int stc_bauddance(stc_dev_t* pdevice, serial_port_t* pport);
