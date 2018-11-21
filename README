@@ -12,3 +12,30 @@ provided by my1termu.
 
 I got most (if not all :p) information on STC bootloader interface from
 stcdude (deprecated) and stcgal.
+
+*Note* The following is for use in Slackware Linux only. Other distributions
+may require alternative/other step(s).
+
+The current Linux kernel driver (ch341.c) does not support parity control,
+which is used by the bootloader in STC controllers. So, get 'patched' version
+in res folder and copy that into '/usr/src/linux/drivers/usb/serial/' and
+recompile the module.
+
+Recompile the module:
+
+	cd /usr/src/linux
+	make M=drivers/usb/serial modules
+
+Make sure to disconnect the cable and the module is not loaded
+
+	rmmod ch341
+
+Copy (i.e. 'install') the module into its expected location
+
+	cp drivers/usb/serial/ch341.ko \
+		/lib/modules/`uname -r`/kernel/drivers/usb/serial/
+
+*Disclaimer* The source ch341.c is copied from Linux kernel tree for my
+personal reference so that I can create proper patch when (and if) that code
+is updated WITHOUT the required parity control code. Naturally, ch341_patched.c
+is the patched ch341.c code.
