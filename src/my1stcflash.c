@@ -441,6 +441,26 @@ int hex2_memorybin(memorybin_t* mem,char* filename)
 	return test;
 }
 /*----------------------------------------------------------------------------*/
+void print_device_packet(stc_dev_t* pdevice)
+{
+	int loop;
+	printf("---------------\n");
+	printf("PACKET:%s\n",
+		pdevice->packet[2]==STC_PACKET_HOST2MCU?"host2mcu":
+		pdevice->packet[2]==STC_PACKET_MCU2HOST?"mcu2host":"UNKNOWN!");
+	printf("---------------\n");
+	for (loop=0;loop<pdevice->pcount;loop++)
+	{
+		printf("%02X ",pdevice->packet[loop]);
+	}
+	printf("\n");
+	printf("Init:0x%04X (0x%04X)\n",pdevice->info.imark,STC_PACKET_MX);
+	printf("Type:0x%02X\n",pdevice->info.hflag);
+	printf("Size:%d (0x%04X-6)\n",pdevice->info.psize-6,pdevice->info.psize);
+	printf("Mark:0x%02X (0x%02X)\n",pdevice->info.emark,STC_PACKET_ME);
+	printf("CSUM:0x%04X (0x%04X)\n",pdevice->info.cksum,pdevice->csum);
+}
+/*----------------------------------------------------------------------------*/
 int main(int argc, char* argv[])
 {
 	ASerialPort_t cPort;
@@ -485,7 +505,7 @@ int main(int argc, char* argv[])
 			{
 				if(get_param_int(argc,argv,&loop,&test)<0)
 				{
-					printf("Cannot get baud rate!\n\n");
+					printf("Cannot get baud rate!\n");
 					return ERROR_PARAM_BAUD;
 				}
 				baudrate = test;
@@ -502,7 +522,7 @@ int main(int argc, char* argv[])
 			{
 				if(get_param_int(argc,argv,&loop,&test)<0)
 				{
-					printf("Cannot get timeout value!\n\n");
+					printf("Cannot get timeout value!\n");
 					return ERROR_PARAM_BAUD;
 				}
 				time_out = test;
@@ -677,37 +697,57 @@ int main(int argc, char* argv[])
 		printf("\nInit handshake... ");
 		test = stc_handshake(&device,&cPort);
 		if (!test) printf("success! {%02x}",device.flag);
-		else { printf("error! (%d)\n",test); exit(1); }
+		else
+		{
+			printf("error! (%d)\n",test);
+			print_device_packet(&device);
+			exit(1);
+		}
 		printf("\nInit baud test... ");
 		test = stc_bauddance(&device,&cPort);
 		if (!test) printf("success! {%02x}",device.flag);
-		else { printf("error! (%d)\n",test); exit(1); }
+		else
+		{
+			printf("error! (%d)\n",test);
+			print_device_packet(&device);
+			exit(1);
+		}
 		device.flag = PAYLOAD_BAUD_CONFIRM;
 		printf("\nDone baud test... ");
 		test = stc_bauddance(&device,&cPort);
 		if (!test) printf("success! {%02x}",device.flag);
-		else { printf("error! (%d)\n",test); exit(1); }
+		else
+		{
+			printf("error! (%d)\n",test);
+			print_device_packet(&device);
+			exit(1);
+		}
 		/* continue only if we are flashing */
 		if (pfile)
 		{
 			printf("\nErase memory... ");
 			test = stc_erase_mem(&device,&cPort);
 			if (!test) printf("success! {%02x}",device.flag);
-			else { printf("error! (%d)\n",test); exit(1); }
+			else
+			{
+				printf("error! (%d)\n",test);
+				print_device_packet(&device);
+				exit(1);
+			}
 			printf("\nFlash memory... ");
 			test = stc_flash_mem(&device,&cPort);
 			if (!test) printf("success! {%02x}",device.flag);
-			else { printf("error! (%d)\n",test); }
-#if 0
-			printf("\nPrevious Packet: ");
-			for(loop=0;loop<device.pcount;loop++)
-				printf("[%02x]",device.packet[loop]);
-#endif
+			else
+			{
+				printf("error! (%d)\n",test);
+				print_device_packet(&device);
+				exit(1);
+			}
 			printf("\nSetting Options Not Supported!");
 		}
 	}
 	else printf("error? (%d)",test);
-	putchar('\n');
+	printf("\n\n");
 
 	/** cleanup */
 	list_clean(&mcudb,&list_free_item);

@@ -26,12 +26,11 @@
 #define STC_PACKET_DATA_OFFSET 5
 /*----------------------------------------------------------------------------*/
 #define STC_PACKET_VALID 0
-#define STC_PACKET_ERROR -10
-#define STC_PACKET_ERROR_BEGMARK (STC_PACKET_ERROR-1)
-#define STC_PACKET_ERROR_ENDMARK (STC_PACKET_ERROR-2)
-#define STC_PACKET_ERROR_DIRECT (STC_PACKET_ERROR-3)
-#define STC_PACKET_ERROR_LENGTH (STC_PACKET_ERROR-4)
-#define STC_PACKET_ERROR_CHECKSUM (STC_PACKET_ERROR-5)
+#define STC_PACKET_ERROR_BEGMARK -1
+#define STC_PACKET_ERROR_ENDMARK -2
+#define STC_PACKET_ERROR_DIRECT -3
+#define STC_PACKET_ERROR_LENGTH -4
+#define STC_PACKET_ERROR_CHECKSUM -5
 /*----------------------------------------------------------------------------*/
 typedef struct _stc_packet_t
 {
@@ -84,7 +83,7 @@ typedef struct _stc_dev_t
 	int pcount;
 	unsigned char packet[STC_PACKET_SIZE];
 	stc_packet_t info;
-	int flag, uid0, uid1;
+	int flag, uid0, uid1, csum;
 	char label[STC_DEVICE_NAME_LEN];
 	int fw11, fw12, fw20;
 	int fmemsize, ememsize; /* flash size & eeprom size */

@@ -64,6 +64,7 @@ int stc_validate_packet(stc_dev_t* pdevice)
 	/* 16-bit big-endian checksum */
 	pdevice->info.cksum = ((int)pdevice->packet[loop-2]<<8) +
 		pdevice->packet[loop-1];
+	pdevice->csum = stc_generate_chksum(pdevice);
 	/* do validation! */
 	if (pdevice->info.imark!=STC_PACKET_MX)
 		test = STC_PACKET_ERROR_BEGMARK;
@@ -73,10 +74,10 @@ int stc_validate_packet(stc_dev_t* pdevice)
 		test = STC_PACKET_ERROR_LENGTH;
 	else if (pdevice->info.emark!=STC_PACKET_ME)
 		test = STC_PACKET_ERROR_ENDMARK;
-	else if (pdevice->info.cksum!=stc_generate_chksum(pdevice))
+	else if (pdevice->info.cksum!=pdevice->csum)
 		test = STC_PACKET_ERROR_CHECKSUM;
 	/* update error flag */
-	pdevice->error = test;
+	pdevice->error += test;
 	return test;
 }
 /*----------------------------------------------------------------------------*/
@@ -204,11 +205,11 @@ int stc_packet_pack(stc_dev_t* pdevice, unsigned char* pdata, int dsize)
 	return loop;
 }
 /*----------------------------------------------------------------------------*/
-#define STC_PACKET_WAIT_TIMEOUT -1
-#define STC_PACKET_USER_ABORT -2
-#define STC_PACKET_VALIDATE_ERROR -3
-#define STC_PACKET_HANDSHAKE_ERROR -4
-#define STC_PACKET_FLASH_ERROR -5
+#define STC_PACKET_WAIT_TIMEOUT -10
+#define STC_PACKET_USER_ABORT -20
+#define STC_PACKET_VALIDATE_ERROR -30
+#define STC_PACKET_HANDSHAKE_ERROR -40
+#define STC_PACKET_FLASH_ERROR -50
 /*----------------------------------------------------------------------------*/
 int stc_packet_send(stc_dev_t* pdevice, serial_port_t* pport)
 {
@@ -216,10 +217,6 @@ int stc_packet_send(stc_dev_t* pdevice, serial_port_t* pport)
 	int loop, test = 0;
 	for (loop=0;loop<pdevice->pcount;loop++)
 	{
-#if 0
-#include <stdio.h>
-		printf("[%02x]",pdevice->packet[loop]);
-#endif
 		put_byte_serial(pport,pdevice->packet[loop]);
 	}
 	while(1)
@@ -239,7 +236,7 @@ int stc_packet_send(stc_dev_t* pdevice, serial_port_t* pport)
 			break;
 		}
 	}
-	pdevice->error = test;
+	pdevice->error += test;
 	return test;
 }
 /*----------------------------------------------------------------------------*/
@@ -255,7 +252,7 @@ int stc_handshake(stc_dev_t* pdevice, serial_port_t* pport)
 	{
 		pdevice->flag = pdevice->info.pdata[PAYLOAD_INFO_OFFSET_FLAG];
 		if (pdevice->flag!=PAYLOAD_HANDSHAKE_ID||pdevice->info.dsize!=1)
-			pdevice->error = STC_PACKET_HANDSHAKE_ERROR;
+			pdevice->error += STC_PACKET_HANDSHAKE_ERROR;
 	}
 	return pdevice->error;
 }
@@ -353,7 +350,7 @@ int stc_flash_mem(stc_dev_t* pdevice, serial_port_t* pport)
 		/* do checksum? */
 		if ((int)pdevice->info.pdata[1]!=csum)
 		{
-			pdevice->error = STC_PACKET_FLASH_ERROR;
+			pdevice->error += STC_PACKET_FLASH_ERROR;
 			break;
 		}
 		size -= STC_FLASH_BLOCK_SIZE;
