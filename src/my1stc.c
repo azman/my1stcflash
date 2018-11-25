@@ -370,3 +370,36 @@ int stc_flash_mem(stc_dev_t* pdevice, serial_port_t* pport)
 	return pdevice->error;
 }
 /*----------------------------------------------------------------------------*/
+#define OPTION_MCS_BYTESIZE 16
+#define OPTION_CLK_BYTESIZE 4
+#define OPTION_COMMAND_SIZE (1+OPTION_MCS_BYTESIZE+OPTION_CLK_BYTESIZE)
+/*----------------------------------------------------------------------------*/
+int stc_send_opts(stc_dev_t* pdevice, serial_port_t* pport)
+{
+	int loop, next;
+	unsigned int temp;
+	unsigned char data[OPTION_COMMAND_SIZE];
+	unsigned char *swap;
+	/* create data */
+	data[0] = PAYLOAD_FLASH_OPTION;
+	data[1] = OPTION_MCS0;
+	data[2] = OPTION_MCS1;
+	data[3] = OPTION_MCS2;
+	data[4] = OPTION_MCS3;
+	for (loop=5;loop<OPTION_MCS_BYTESIZE;loop++)
+		data[loop] = OPTION_MCSD; /* dummy/use defaults */
+	/* clk0-3: 32-bit big endian value in Hz? */
+	temp = (unsigned int) pdevice->freq/1000000;
+	swap = (unsigned char*) &temp;
+	for (next=0;next<4;next++,loop++)
+		data[loop+next] = swap[3-next];
+	/* form packet */
+	stc_packet_pack(pdevice,data,sizeof(data));
+	/* send packet */
+	if (!stc_packet_send(pdevice,pport))
+	{
+		pdevice->flag = pdevice->info.pdata[PAYLOAD_INFO_OFFSET_FLAG];
+	}
+	return pdevice->error;
+}
+/*----------------------------------------------------------------------------*/

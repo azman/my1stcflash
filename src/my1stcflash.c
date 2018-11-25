@@ -743,7 +743,15 @@ int main(int argc, char* argv[])
 				print_device_packet(&device);
 				exit(1);
 			}
-			printf("\nSetting Options Not Supported!");
+			printf("\nSend device options... ");
+			test = stc_send_opts(&device,&cPort);
+			if (!test) printf("success! {%02x}",device.flag);
+			else
+			{
+				printf("error! (%d)\n",test);
+				print_device_packet(&device);
+				exit(1);
+			}
 		}
 	}
 	else printf("error? (%d)",test);

@@ -60,6 +60,19 @@ typedef struct _stc_payload_info_t
 } __attribute__ ((packed))
 stc_payload_info_t;
 /*----------------------------------------------------------------------------*/
+#define STC15C5A60S2_OPT_MCS0 0xFF
+#define STC15C5A60S2_OPT_MCS1 0x7F
+/** options are usually active low */
+#define OPTION_MCS1_PORD 0x80
+#define STC15C5A60S2_OPT_MCS2 0xF7
+#define OPTION_MCS2_NOWD 0x08
+#define STC15C5A60S2_OPT_MCS3 0xFF
+#define OPTION_MCS0 STC15C5A60S2_OPT_MCS0
+#define OPTION_MCS1 STC15C5A60S2_OPT_MCS1
+#define OPTION_MCS2 STC15C5A60S2_OPT_MCS2
+#define OPTION_MCS3 STC15C5A60S2_OPT_MCS3
+#define OPTION_MCSD 0xFF
+/*----------------------------------------------------------------------------*/
 #define PAYLOAD_INFO_ID 0x50
 #define PAYLOAD_INFO_OFFSET_FLAG 0x00
 #define PAYLOAD_INFO_OFFSET_SYNC 0x01
@@ -72,6 +85,7 @@ stc_payload_info_t;
 #define PAYLOAD_ERASE_MEMORY 0x84
 #define PAYLOAD_FLASH_MEMORY 0x00
 #define PAYLOAD_FLASH_FINISH 0x69
+#define PAYLOAD_FLASH_OPTION 0x8d
 /*----------------------------------------------------------------------------*/
 #define STC_DEVICE_NAME_LEN 16
 #define STC_FLASH_BLOCK_SIZE 128
@@ -108,6 +122,7 @@ int stc_handshake(stc_dev_t* pdevice, serial_port_t* pport);
 int stc_bauddance(stc_dev_t* pdevice, serial_port_t* pport);
 int stc_erase_mem(stc_dev_t* pdevice, serial_port_t* pport);
 int stc_flash_mem(stc_dev_t* pdevice, serial_port_t* pport);
+int stc_send_opts(stc_dev_t* pdevice, serial_port_t* pport);
 /*----------------------------------------------------------------------------*/
 #endif
 /*----------------------------------------------------------------------------*/
