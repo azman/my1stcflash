@@ -8,29 +8,38 @@
 #define STC_SYNC_TIMEOUT_US 200000
 #define STC_SYNC_INIT -2
 #define STC_SYNC_MISS -1
-#define STC_SYNC_VERR -3
 #define STC_SYNC_DONE 0
 #define STC_SYNC_NONE 1
 #define STC_SYNC_REST 2
 /*----------------------------------------------------------------------------*/
 #define STC_PACKET_SIZE 65536
+/* packet buff size is minus the first 2-byte start headers */
+#define STC_PACKET_BUFF_SIZE (STC_PACKET_SIZE-2)
 /* max data length is actually 0xffff (65535) - dflag,dsize,cksum,emark (6) */
 #define STC_MAX_DATA_LEN 65535-6
 /*----------------------------------------------------------------------------*/
-#define STC_PACKET_MX 0x46b9
 #define STC_PACKET_M0 0x46
 #define STC_PACKET_M1 0xb9
+#define STC_PACKET_MX ((STC_PACKET_M0<<8)|STC_PACKET_M1)
 #define STC_PACKET_ME 0x16
 #define STC_PACKET_HOST2MCU 0x6a
 #define STC_PACKET_MCU2HOST 0x68
 #define STC_PACKET_DATA_OFFSET 5
 /*----------------------------------------------------------------------------*/
 #define STC_PACKET_VALID 0
-#define STC_PACKET_ERROR_BEGMARK -1
-#define STC_PACKET_ERROR_ENDMARK -2
-#define STC_PACKET_ERROR_DIRECT -3
-#define STC_PACKET_ERROR_LENGTH -4
-#define STC_PACKET_ERROR_CHECKSUM -5
+#define STC_PACKET_USER_ABORT -1
+#define STC_PACKET_ERROR_BEGMARK0 -2
+#define STC_PACKET_ERROR_BEGMARK1 -3
+#define STC_PACKET_ERROR_ENDMARK -4
+#define STC_PACKET_ERROR_DIRECT -5
+#define STC_PACKET_ERROR_LENGTH -6
+#define STC_PACKET_ERROR_CHECKSUM -7
+#define STC_PACKET_ERROR_OVERFLOW -8
+/*----------------------------------------------------------------------------*/
+#define STC_PACKET_HANDSHAKE_ERROR -10
+#define STC_PACKET_FLASH_ERROR -20
+#define STC_PACKET_BAUDDANCE_ERROR -30
+#define STC_PACKET_BAUDRATE_ERROR -40
 /*----------------------------------------------------------------------------*/
 typedef struct _stc_packet_t
 {
@@ -62,9 +71,10 @@ stc_payload_info_t;
 /*----------------------------------------------------------------------------*/
 #define STC15C5A60S2_OPT_MCS0 0xFF
 #define STC15C5A60S2_OPT_MCS1 0x7F
-/** options are usually active low */
+/* power-on-reset delay: 0=long 1=short */
 #define OPTION_MCS1_PORD 0x80
 #define STC15C5A60S2_OPT_MCS2 0xF7
+/* watchdog counter in idle mode: 0=stop 1=continue */
 #define OPTION_MCS2_NOWD 0x08
 #define STC15C5A60S2_OPT_MCS3 0xFF
 #define OPTION_MCS0 STC15C5A60S2_OPT_MCS0

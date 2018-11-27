@@ -3,29 +3,11 @@
 #include "my1cons.h"
 #include <sys/time.h>
 /*----------------------------------------------------------------------------*/
-int stc_wait_packet(stc_dev_t* pdevice, serial_port_t* pport)
+unsigned short change_endian(unsigned short *test)
 {
-	int temp,size=0;
-	pdevice->pcount = 0;
-	while(1)
-	{
-		temp = get_byte_serial_timed(pport,pdevice->timeout_us);
-		if(temp==SERIAL_TIMEOUT)
-			break;
-		if(pdevice->pcount<STC_PACKET_SIZE)
-			pdevice->packet[pdevice->pcount++] = (byte_t) temp;
-		else
-			break;
-		if (pdevice->pcount>5)
-		{
-			if ((pdevice->pcount>=size+2)&&temp==STC_PACKET_ME) break;
-		}
-		else if (pdevice->pcount==5)
-		{
-			size = ((int)pdevice->packet[3]<<8) + pdevice->packet[4];
-		}
-	}
-	return temp==SERIAL_TIMEOUT?temp:pdevice->pcount;
+	unsigned char *byte = (unsigned char*) test;
+	unsigned short swap = byte[0];
+	return (swap<<8)|byte[1];
 }
 /*----------------------------------------------------------------------------*/
 unsigned short stc_generate_chksum(stc_dev_t* pdevice)
@@ -37,62 +19,79 @@ unsigned short stc_generate_chksum(stc_dev_t* pdevice)
 	return csum;
 }
 /*----------------------------------------------------------------------------*/
-int stc_validate_packet(stc_dev_t* pdevice)
+int stc_packet_wait(stc_dev_t* pdevice, serial_port_t* pport)
 {
-	int test = STC_PACKET_VALID, loop;
-	/* 16-bit big-endian init marker */
-	pdevice->info.imark = ((int)pdevice->packet[0]<<8) + pdevice->packet[1];
-	/* direction */
-	pdevice->info.hflag = (int)pdevice->packet[2];
+	int next = 0, size, loop;
+	unsigned char temp;
+	unsigned short csum;
+	pdevice->pcount = 0;
+	/* allow user break while waiting? */
+	while(1)
+	{
+		if(check_incoming(pport))
+			break;
+		if(get_keyhit()==KEY_ESCAPE)
+			return STC_PACKET_USER_ABORT;
+	}
+	/* start reading - get start marker */
+	temp = get_byte_serial(pport);
+	pdevice->packet[next++] = temp;
+	if (temp!=STC_PACKET_M0)
+		return STC_PACKET_ERROR_BEGMARK0;
+	temp = get_byte_serial(pport);
+	pdevice->packet[next++] = temp;
+	if (temp!=STC_PACKET_M1)
+		return STC_PACKET_ERROR_BEGMARK1;
+	/* do we need this? */
+	pdevice->info.imark = change_endian((unsigned short*)&pdevice->packet[0]);
+	/* get packet direction flag */
+	temp = get_byte_serial(pport);
+	pdevice->packet[next++] = temp;
+	if (temp!=STC_PACKET_MCU2HOST)
+		return STC_PACKET_ERROR_DIRECT;
+	/* do we need this? */
+	pdevice->info.hflag = pdevice->packet[2];
+	/* get size */
+	pdevice->packet[next++] = get_byte_serial(pport);
+	pdevice->packet[next++] = get_byte_serial(pport);
 	/* 16-bit big-endian length */
-	pdevice->info.psize = ((int)pdevice->packet[3]<<8) + pdevice->packet[4];
+	size = (int) change_endian((unsigned short*)&pdevice->packet[3]);
+	if (size>=STC_PACKET_BUFF_SIZE)
+		return STC_PACKET_ERROR_LENGTH;
+	/* do we need this? */
+	pdevice->info.psize = size;
+	size -= 3; /* minus DR,L0,L1 */
+	/* get all remaining packet */
+	for (loop=0;loop<size;loop++)
+		pdevice->packet[next++] = get_byte_serial(pport);
+	/* assume ok? place all info? */
+	pdevice->pcount = next;
+	/* check end marker */
+	temp = pdevice->packet[next-1];
+	if (temp!=STC_PACKET_ME)
+		return STC_PACKET_ERROR_ENDMARK;
+	/* do we need this? */
+	pdevice->info.emark = temp;
+	/* calculate checksum */
+	csum = stc_generate_chksum(pdevice);
+	/* 16-bit big-endian checksum */
+	pdevice->csum = change_endian((unsigned short*)&pdevice->packet[next-3]);
+	if ((int)csum!=pdevice->csum)
+		return STC_PACKET_ERROR_CHECKSUM;
+	/* do we need this? */
+	pdevice->info.cksum = csum;
 	/* assign data pointer */
 	pdevice->info.pdata = &pdevice->packet[5];
 	pdevice->info.dsize = pdevice->info.psize - 6;
-	/* check packet size for 'implied' end marker? */
-	loop = pdevice->pcount;
-	if (loop==STC_PACKET_SIZE)
-	{
-		/* end marker is implied */
-		pdevice->info.emark = STC_PACKET_ME;
-	}
-	else
-	{
-		loop--;
-		pdevice->info.emark = pdevice->packet[loop];
-	}
-	/* 16-bit big-endian checksum */
-	pdevice->info.cksum = ((int)pdevice->packet[loop-2]<<8) +
-		pdevice->packet[loop-1];
-	pdevice->csum = stc_generate_chksum(pdevice);
-	/* do validation! */
-	if (pdevice->info.imark!=STC_PACKET_MX)
-		test = STC_PACKET_ERROR_BEGMARK;
-	else if (pdevice->info.hflag!=STC_PACKET_MCU2HOST)
-		test = STC_PACKET_ERROR_DIRECT;
-	else if (pdevice->info.psize!=pdevice->pcount-2)
-		test = STC_PACKET_ERROR_LENGTH;
-	else if (pdevice->info.emark!=STC_PACKET_ME)
-		test = STC_PACKET_ERROR_ENDMARK;
-	else if (pdevice->info.cksum!=pdevice->csum)
-		test = STC_PACKET_ERROR_CHECKSUM;
-	/* update error flag */
-	pdevice->error += test;
-	return test;
-}
-/*----------------------------------------------------------------------------*/
-unsigned short change_endian(unsigned short test)
-{
-	unsigned char *byte = (unsigned char*) &test;
-	unsigned short swap = byte[0];
-	return (swap<<8)|byte[1];
+	/* ok? */
+	return STC_PACKET_VALID;
 }
 /*----------------------------------------------------------------------------*/
 int stc_check_isp(stc_dev_t* pdevice, serial_port_t* pport)
 {
-	struct timeval inittime, currtime;
 	my1key_t key;
-	int do_wait = 0, loop;
+	struct timeval inittime, currtime;
+	int do_wait = 0, loop, test;
 	int status = STC_SYNC_INIT;
 	while(status<STC_SYNC_DONE)
 	{
@@ -114,10 +113,12 @@ int stc_check_isp(stc_dev_t* pdevice, serial_port_t* pport)
 		}
 		if(check_incoming(pport))
 		{
-			if (stc_wait_packet(pdevice,pport)==SERIAL_TIMEOUT)
+			test = stc_packet_wait(pdevice,pport);
+			if (test!=STC_PACKET_VALID)
+			{
+				pdevice->error += test;
 				status = STC_SYNC_MISS;
-			else if (stc_validate_packet(pdevice)!=STC_PACKET_VALID)
-				status = STC_SYNC_VERR;
+			}
 			else
 			{
 				unsigned long test = 0;
@@ -126,7 +127,7 @@ int stc_check_isp(stc_dev_t* pdevice, serial_port_t* pport)
 				pdevice->flag = info->flag;
 				/* detect target frequency */
 				for (loop=0;loop<8;loop++)
-					test += (unsigned long)change_endian(info->sync[loop]);
+					test += (unsigned long)change_endian(&info->sync[loop]);
 				test >>= 3; /* divide-by-8: get average */
 				test *= 1200; /* target minimum baudrate? */
 				test /= 5816; /* dunno why? */
@@ -205,32 +206,23 @@ int stc_packet_pack(stc_dev_t* pdevice, unsigned char* pdata, int dsize)
 	return loop;
 }
 /*----------------------------------------------------------------------------*/
-#define STC_PACKET_WAIT_TIMEOUT -10
-#define STC_PACKET_USER_ABORT -20
-#define STC_PACKET_VALIDATE_ERROR -30
-#define STC_PACKET_HANDSHAKE_ERROR -40
-#define STC_PACKET_FLASH_ERROR -50
-/*----------------------------------------------------------------------------*/
 int stc_packet_send(stc_dev_t* pdevice, serial_port_t* pport)
 {
-	my1key_t key;
-	int loop, test = 0;
+	int loop, test = STC_PACKET_USER_ABORT;
+	/* just in case, purge the incoming line */
+	purge_serial(pport);
+	/* send the packet */
 	for (loop=0;loop<pdevice->pcount;loop++)
-	{
 		put_byte_serial(pport,pdevice->packet[loop]);
-	}
+	/* wait for response */
 	while(1)
 	{
 		if(check_incoming(pport))
 		{
-			if (stc_wait_packet(pdevice,pport)==SERIAL_TIMEOUT)
-				test = STC_PACKET_WAIT_TIMEOUT;
-			else if (stc_validate_packet(pdevice)!=STC_PACKET_VALID)
-				test = STC_PACKET_VALIDATE_ERROR;
+			test = stc_packet_wait(pdevice,pport);
 			break;
 		}
-		key = get_keyhit();
-		if(key==KEY_ESCAPE)
+		if(get_keyhit()==KEY_ESCAPE)
 		{
 			test = STC_PACKET_USER_ABORT;
 			break;
@@ -248,7 +240,7 @@ int stc_handshake(stc_dev_t* pdevice, serial_port_t* pport)
 	/* form packet */
 	stc_packet_pack(pdevice,data,sizeof(data));
 	/* send packet */
-	if (!stc_packet_send(pdevice,pport))
+	if (stc_packet_send(pdevice,pport)==STC_PACKET_VALID)
 	{
 		pdevice->flag = pdevice->info.pdata[PAYLOAD_INFO_OFFSET_FLAG];
 		if (pdevice->flag!=PAYLOAD_HANDSHAKE_ID||pdevice->info.dsize!=1)
@@ -257,6 +249,8 @@ int stc_handshake(stc_dev_t* pdevice, serial_port_t* pport)
 	return pdevice->error;
 }
 /*----------------------------------------------------------------------------*/
+#include <stdio.h>
+/*----------------------------------------------------------------------------*/
 int stc_bauddance(stc_dev_t* pdevice, serial_port_t* pport)
 {
 /*
@@ -264,16 +258,30 @@ sample_rate = 16 (6T) or 32
 brt = 65536 - round((freq)/(baudrate*sample_rate))
 brt_csum = (2*(256-brt))&0xff
 */
-	int test = -((pdevice->freq*1000000)/(pdevice->baudr*16));
+	int test = 256-((pdevice->freq*1000000)/(pdevice->baudr*16));
 	unsigned char baud = test&0xff;
 	unsigned char bsum = (2*(256-(int)baud))&0xff;
 	unsigned char dlay = 0x80; /* stc-isp=>0xa0, stc-gal=>0x40 */
 	unsigned char iapw = 0x83; /* iap wait register? */
 	unsigned char data[] = { pdevice->flag,0xc0,baud,0x3f,bsum,dlay,iapw };
+	int baudthat = (int)((pdevice->freq*1000000)/(16*(256-baud)));
+	int baud_err = (int)(((pdevice->baudr-baudthat)*100.0)/pdevice->baudr);
+	/* check if baudrate achievable... with acceptable error tolerance */
+	if (test<=1||test>255)
+	{
+		pdevice->error += STC_PACKET_BAUDDANCE_ERROR;
+		return pdevice->error;
+	}
+	if (baud_err>3)
+	{
+printf("\nBaud error=%d%% (%d-%d)\n\n",baud_err,baudthat,pdevice->baudr);
+		//pdevice->error += STC_PACKET_BAUDRATE_ERROR;
+		//return pdevice->error;
+	}
 	/* form packet */
 	stc_packet_pack(pdevice,data,sizeof(data));
 	/* send packet */
-	if (!stc_packet_send(pdevice,pport))
+	if (stc_packet_send(pdevice,pport)==STC_PACKET_VALID)
 	{
 		pdevice->flag = pdevice->info.pdata[PAYLOAD_INFO_OFFSET_FLAG];
 	}
@@ -306,7 +314,7 @@ int stc_erase_mem(stc_dev_t* pdevice, serial_port_t* pport)
 	/* form packet */
 	stc_packet_pack(pdevice,data,sizeof(data));
 	/* send packet */
-	if (!stc_packet_send(pdevice,pport))
+	if (stc_packet_send(pdevice,pport)==STC_PACKET_VALID)
 	{
 		pdevice->flag = pdevice->info.pdata[PAYLOAD_INFO_OFFSET_FLAG];
 	}
@@ -344,7 +352,7 @@ int stc_flash_mem(stc_dev_t* pdevice, serial_port_t* pport)
 		/* form packet */
 		stc_packet_pack(pdevice,data,step);
 		/* send packet */
-		if (!stc_packet_send(pdevice,pport))
+		if (stc_packet_send(pdevice,pport)==STC_PACKET_VALID)
 			pdevice->flag = pdevice->info.pdata[PAYLOAD_INFO_OFFSET_FLAG];
 		else break;
 		/* do checksum? */
@@ -364,7 +372,7 @@ int stc_flash_mem(stc_dev_t* pdevice, serial_port_t* pport)
 		/* form packet */
 		stc_packet_pack(pdevice,data,sizeof(data));
 		/* send packet */
-		if (!stc_packet_send(pdevice,pport))
+		if (stc_packet_send(pdevice,pport)==STC_PACKET_VALID)
 			pdevice->flag = pdevice->info.pdata[PAYLOAD_INFO_OFFSET_FLAG];
 	}
 	return pdevice->error;
@@ -396,7 +404,7 @@ int stc_send_opts(stc_dev_t* pdevice, serial_port_t* pport)
 	/* form packet */
 	stc_packet_pack(pdevice,data,sizeof(data));
 	/* send packet */
-	if (!stc_packet_send(pdevice,pport))
+	if (stc_packet_send(pdevice,pport)==STC_PACKET_VALID)
 	{
 		pdevice->flag = pdevice->info.pdata[PAYLOAD_INFO_OFFSET_FLAG];
 	}

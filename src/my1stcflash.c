@@ -31,6 +31,8 @@
 /*----------------------------------------------------------------------------*/
 #define DEFAULT_MCUDB "stcmcudb.txt"
 /*----------------------------------------------------------------------------*/
+#define DEFAULT_BAUDRATE 9600
+/*----------------------------------------------------------------------------*/
 void about(void)
 {
 	printf("\nUse:\n  %s [options] [command]\n",PROGNAME);
@@ -64,31 +66,27 @@ void print_portscan(ASerialPort_t* aPort)
 	printf("\nDetected Port(s): %d\n\n",cCount);
 }
 /*----------------------------------------------------------------------------*/
-int get_actual_baudrate(int encoded_rate)
+void change_baudrate(ASerialPort_t* aPort, ASerialConf_t* aConf, int baudrate)
 {
-	int baudrate = 0;
-	switch(encoded_rate)
+	int baudcode, baudtemp;
+	get_serialconfig(aPort,aConf);
+	baudcode = get_encoded_baudrate(baudrate);
+	if (baudcode!=aConf->mBaudRate)
 	{
-		case MY1BAUD1200: baudrate = 1200; break;
-		case MY1BAUD2400: baudrate = 2400; break;
-		case MY1BAUD4800: baudrate = 4800; break;
-		case MY1BAUD9600: baudrate = 9600; break;
-		case MY1BAUD19200: baudrate = 19200; break;
-		case MY1BAUD38400: baudrate = 38400; break;
-		case MY1BAUD57600: baudrate = 57600; break;
-		case MY1BAUD115200: baudrate = 115200; break;
+		/* need a change! */
+		baudtemp = get_actual_baudrate(aConf->mBaudRate);
+		aConf->mBaudRate = baudcode;
+		printf("Changing baudrate: %d -> %d\n",baudtemp,baudrate);
+		set_serialconfig(aPort,aConf);
+		/* try to reopen */
+		close_serial(aPort);
+		if(open_serial(aPort))
+			purge_serial(aPort); /* clear input buffer */
+		else
+			printf("Cannot re-open port '%s%d'!\n",
+				aPort->mPortName,aPort->mPortIndex);
+		printf("\n");
 	}
-	return baudrate;
-}
-/*----------------------------------------------------------------------------*/
-void print_currtime(FILE* pfile)
-{
-	double test;
-	struct timeval inittime;
-	gettimeofday(&inittime,0x0);
-	test = (double)inittime.tv_sec;
-	test += (double)inittime.tv_usec/1000000;
-	fprintf(pfile,"[%20.6lf]",test);
 }
 /*----------------------------------------------------------------------------*/
 char is_whitespace(char achar)
@@ -443,29 +441,32 @@ int hex2_memorybin(memorybin_t* mem,char* filename)
 /*----------------------------------------------------------------------------*/
 void print_device_packet(stc_dev_t* pdevice)
 {
-	int loop;
+	int loop, temp, size = pdevice->pcount;
 	printf("---------------\n");
 	printf("PACKET:%s\n",
 		pdevice->packet[2]==STC_PACKET_HOST2MCU?"host2mcu":
 		pdevice->packet[2]==STC_PACKET_MCU2HOST?"mcu2host":"UNKNOWN!");
 	printf("---------------\n");
-	for (loop=0;loop<pdevice->pcount;loop++)
-	{
+	for (loop=0;loop<size;loop++)
 		printf("%02X ",pdevice->packet[loop]);
-	}
-	printf("\n");
-	printf("Init:0x%04X (0x%04X)\n",pdevice->info.imark,STC_PACKET_MX);
-	printf("Type:0x%02X\n",pdevice->info.hflag);
-	printf("Size:%d (0x%04X-6)\n",pdevice->info.psize-6,pdevice->info.psize);
-	printf("Mark:0x%02X (0x%02X)\n",pdevice->info.emark,STC_PACKET_ME);
-	printf("CSUM:0x%04X (0x%04X)\n",pdevice->info.cksum,pdevice->csum);
+	if (size>0)
+		printf("\n");
+	printf("Init: %02X %02X (%02X %02X)\n",
+		pdevice->packet[0],pdevice->packet[1],STC_PACKET_M0,STC_PACKET_M1);
+	printf("Type: %02X\n",pdevice->packet[2]);
+	printf("Flag: %02X\n",pdevice->packet[STC_PACKET_DATA_OFFSET]);
+	temp = (int)(pdevice->packet[3]<<8)|pdevice->packet[4];
+	printf("Size: %d (%d(@0x%04X)-6)[%d]\n",temp-6,temp,temp,size);
+	printf("Mark: %02X (%02X)\n",pdevice->packet[size-1],STC_PACKET_ME);
+	printf("CSUM: %02X %02X\n",pdevice->packet[size-3],pdevice->packet[size-2]);
 }
 /*----------------------------------------------------------------------------*/
 int main(int argc, char* argv[])
 {
 	ASerialPort_t cPort;
 	ASerialConf_t cConf;
-	int loop, test, temp, port=1, baudrate = 0;
+	int loop, test, temp, port=1, baudrate = DEFAULT_BAUDRATE,
+		baudhand = DEFAULT_BAUDRATE;
 	int time_out = STC_SYNC_TIMEOUT_US;
 	int do_command = COMMAND_NONE;
 	char *pfile = 0x0, *ptty = 0x0, *plist = 0x0;
@@ -505,10 +506,19 @@ int main(int argc, char* argv[])
 			{
 				if(get_param_int(argc,argv,&loop,&test)<0)
 				{
-					printf("Cannot get baud rate!\n");
+					printf("Cannot get transfer baud rate!\n");
 					return ERROR_PARAM_BAUD;
 				}
 				baudrate = test;
+			}
+			else if(!strcmp(argv[loop],"--hand"))
+			{
+				if(get_param_int(argc,argv,&loop,&test)<0)
+				{
+					printf("Cannot get handshake baud rate!\n");
+					return ERROR_PARAM_BAUD;
+				}
+				baudhand = test;
 			}
 			else if(!strcmp(argv[loop],"--tty"))
 			{
@@ -604,20 +614,36 @@ int main(int argc, char* argv[])
 	get_serialconfig(&cPort,&cConf);
 
 	/** apply custom config */
-	if(baudrate)
+	if(baudhand)
 	{
-		switch(baudrate)
+		switch(baudhand)
 		{
 			case 1200: cConf.mBaudRate = MY1BAUD1200; break;
 			case 2400: cConf.mBaudRate = MY1BAUD2400; break;
 			case 4800: cConf.mBaudRate = MY1BAUD4800; break;
-			default:
-				printf("Invalid baudrate (%d)! Using default!\n", baudrate);
 			case 9600: cConf.mBaudRate = MY1BAUD9600; break;
 			case 19200: cConf.mBaudRate = MY1BAUD19200; break;
 			case 38400: cConf.mBaudRate = MY1BAUD38400; break;
 			case 57600: cConf.mBaudRate = MY1BAUD57600; break;
 			case 115200: cConf.mBaudRate = MY1BAUD115200; break;
+			default:
+				printf("Invalid handshake baud (%d)! Using default (%d)!\n",
+					baudhand,DEFAULT_BAUDRATE);
+				baudhand = DEFAULT_BAUDRATE;
+		}
+	}
+	if(baudrate)
+	{
+		switch(baudrate)
+		{
+			case 1200: case 2400: case 4800:
+			case 9600: case 19200: case 38400:
+			case 57600: case 115200:
+				break;
+			default:
+				printf("Invalid baudrate (%d)! Using default (%d)!\n",
+					baudrate,DEFAULT_BAUDRATE);
+				baudrate = DEFAULT_BAUDRATE;
 		}
 	}
 	cConf.mParity = MY1PARITY_EVEN; /** stc12 uses this! */
@@ -628,7 +654,7 @@ int main(int argc, char* argv[])
 	/* device interface configuration */
 	device.timeout_us = time_out;
 	device.error = 0;
-	device.baudr = get_actual_baudrate(cConf.mBaudRate);
+	device.baudr = baudrate;
 	device.label[0] = 0x0;
 	device.data = 0x0;
 	if (pfile)
@@ -640,18 +666,17 @@ int main(int argc, char* argv[])
 	/** load mcu db! */
 	list_setup(&mcudb,LIST_TYPE_QUEUE);
 	if (!plist) plist = dlist;
-	printf("\nLoading device database... ");
+	printf("Loading device database... ");
 	get_device_list(&mcudb,plist);
-	printf("done! (%d)",mcudb.count);
+	printf("done! (%d)\n",mcudb.count);
 #ifdef MY1DEBUG
-	printf("\nDevice List:\n");
+	printf("Device List:\n");
 	mcudb.curr = 0x0;
 	while(list_iterate(&mcudb))
 	{
 		stcmcu_t *item = (stcmcu_t *) mcudb.curr->item;
 		printf("{ID0:%d,ID1:%d} => %s\n",item->uid0,item->uid1,item->label);
 	}
-	printf("\n");
 #endif
 
 	/** try to open port */
@@ -662,20 +687,29 @@ int main(int argc, char* argv[])
 		return ERROR_PORT_OPEN;
 	}
 
-	/** clear input buffer */
-	purge_serial(&cPort);
-
 	/** start doing things */
-	printf("\nLooking for STC12 device... ");
-	test = stc_check_isp(&device,&cPort);
-	if (test==STC_SYNC_DONE)
+	do
 	{
+		/** clear input buffer */
+		purge_serial(&cPort);
+		printf("\nLooking for STC12 device... ");
+		test = stc_check_isp(&device,&cPort);
+		if (test==STC_SYNC_NONE||test==STC_SYNC_REST)
+		{
+			printf("user abort. (%d)",test);
+			break;
+		}
+		if (test!=STC_SYNC_DONE)
+		{
+			printf("error?? (%d)(%d)\n",test,device.error);
+			if (device.pcount>0)
+				print_device_packet(&device);
+			device.error = 0; /* start new! */
+			continue;
+		}
 		printf("found! ");
-#ifdef MY1DEBUG
-		printf("\n[CHECK] ");
-		print_currtime(stdout);
-#endif
-		printf("\nBaudrate: %d",device.baudr);
+		printf("\nBaudrate(H): %d",baudhand);
+		printf("\nBaudrate(D): %d",device.baudr);
 		if (find_devinfo(&device,&mcudb)<0)
 		{
 			printf("\nUnknown device (%01x/%01x)!",
@@ -690,10 +724,6 @@ int main(int argc, char* argv[])
 				device.fw11,device.fw12,(char)device.fw20,device.flag);
 		printf("\nFlash  Size: %2d kB",device.fmemsize);
 		printf("\nEEPROM Size: %2d kB",device.ememsize);
-#ifdef MY1DEBUG
-		printf("\n[CHECK] ");
-		print_currtime(stdout);
-#endif
 		printf("\nInit handshake... ");
 		test = stc_handshake(&device,&cPort);
 		if (!test) printf("success! {%02x}",device.flag);
@@ -712,6 +742,8 @@ int main(int argc, char* argv[])
 			print_device_packet(&device);
 			exit(1);
 		}
+		/* change the baudrate if needed */
+		change_baudrate(&cPort,&cConf,baudrate);
 		device.flag = PAYLOAD_BAUD_CONFIRM;
 		printf("\nDone baud test... ");
 		test = stc_bauddance(&device,&cPort);
@@ -753,8 +785,9 @@ int main(int argc, char* argv[])
 				exit(1);
 			}
 		}
+		break;
 	}
-	else printf("error? (%d)",test);
+	while (1); /* for continue to work! */
 	printf("\n\n");
 
 	/** cleanup */
