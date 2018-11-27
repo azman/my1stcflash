@@ -40,6 +40,7 @@
 #define STC_PACKET_FLASH_ERROR -20
 #define STC_PACKET_BAUDDANCE_ERROR -30
 #define STC_PACKET_BAUDRATE_ERROR -40
+#define STC_PACKET_BAUDPONG_ERROR -50
 /*----------------------------------------------------------------------------*/
 typedef struct _stc_packet_t
 {
@@ -62,26 +63,12 @@ typedef struct _stc_payload_info_t
 	unsigned char nul1; /* nul-byte */
 	unsigned char mid[2]; /* 2-byte model id! */
 	unsigned char nul2; /* 0x8c? */
-	unsigned char ms[8]; /* what??? */
+	unsigned char ms[8]; /* options??? */
 	unsigned char uid[7]; /* 7-bytes unique id? */
 	unsigned char un1[5]; /* unknown bytes */
 	/* total 43 bytes??? */
 } __attribute__ ((packed))
 stc_payload_info_t;
-/*----------------------------------------------------------------------------*/
-#define STC15C5A60S2_OPT_MCS0 0xFF
-#define STC15C5A60S2_OPT_MCS1 0x7F
-/* power-on-reset delay: 0=long 1=short */
-#define OPTION_MCS1_PORD 0x80
-#define STC15C5A60S2_OPT_MCS2 0xF7
-/* watchdog counter in idle mode: 0=stop 1=continue */
-#define OPTION_MCS2_NOWD 0x08
-#define STC15C5A60S2_OPT_MCS3 0xFF
-#define OPTION_MCS0 STC15C5A60S2_OPT_MCS0
-#define OPTION_MCS1 STC15C5A60S2_OPT_MCS1
-#define OPTION_MCS2 STC15C5A60S2_OPT_MCS2
-#define OPTION_MCS3 STC15C5A60S2_OPT_MCS3
-#define OPTION_MCSD 0xFF
 /*----------------------------------------------------------------------------*/
 #define PAYLOAD_INFO_ID 0x50
 #define PAYLOAD_INFO_OFFSET_FLAG 0x00
@@ -97,6 +84,7 @@ stc_payload_info_t;
 #define PAYLOAD_FLASH_FINISH 0x69
 #define PAYLOAD_FLASH_OPTION 0x8d
 #define PAYLOAD_DEVICE_RESET 0x82
+#define PAYLOAD_BAUD_CHKPONG 0x80
 /*----------------------------------------------------------------------------*/
 #define STC_DEVICE_NAME_LEN 16
 #define STC_FLASH_BLOCK_SIZE 128
@@ -104,7 +92,7 @@ stc_payload_info_t;
 /*----------------------------------------------------------------------------*/
 typedef struct _stc_dev_t
 {
-	int timeout_us, error, baudrate, baud_err;
+	int timeout_us, error, baudhand, baudrate, baud_err;
 	int pcount;
 	unsigned char packet[STC_PACKET_SIZE];
 	stc_packet_t info;
@@ -113,6 +101,7 @@ typedef struct _stc_dev_t
 	int fw11, fw12, fw20;
 	int fmemsize, ememsize; /* flash size & eeprom size */
 	float freq;
+	unsigned char opts[4]; /* for stc12c5a60s2 */
 	/* flash data? */
 	int datasize;
 	unsigned char *data;
@@ -131,6 +120,7 @@ stcmcu_t;
 int stc_check_isp(stc_dev_t* pdevice, serial_port_t* pport);
 int stc_handshake(stc_dev_t* pdevice, serial_port_t* pport);
 int stc_bauddance(stc_dev_t* pdevice, serial_port_t* pport);
+int stc_baud_pong(stc_dev_t* pdevice, serial_port_t* pport);
 int stc_erase_mem(stc_dev_t* pdevice, serial_port_t* pport);
 int stc_flash_mem(stc_dev_t* pdevice, serial_port_t* pport);
 int stc_send_opts(stc_dev_t* pdevice, serial_port_t* pport);

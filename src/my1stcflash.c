@@ -9,7 +9,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/time.h>
 /*----------------------------------------------------------------------------*/
 #define PROGNAME "my1stcflash"
 /*----------------------------------------------------------------------------*/
@@ -64,29 +63,6 @@ void print_portscan(ASerialPort_t* aPort)
 		}
 	}
 	printf("\nDetected Port(s): %d\n\n",cCount);
-}
-/*----------------------------------------------------------------------------*/
-void change_baudrate(ASerialPort_t* aPort, ASerialConf_t* aConf, int baudrate)
-{
-	int baudcode, baudtemp;
-	get_serialconfig(aPort,aConf);
-	baudcode = get_encoded_baudrate(baudrate);
-	if (baudcode!=aConf->mBaudRate)
-	{
-		/* need a change! */
-		baudtemp = get_actual_baudrate(aConf->mBaudRate);
-		aConf->mBaudRate = baudcode;
-		printf("\nChanging baudrate: %d -> %d\n",baudtemp,baudrate);
-		set_serialconfig(aPort,aConf);
-		/* try to reopen */
-		close_serial(aPort);
-		if(open_serial(aPort))
-			purge_serial(aPort); /* clear input buffer */
-		else
-			printf("Cannot re-open port '%s%d'!\n",
-				aPort->mPortName,aPort->mPortIndex);
-		printf("\n");
-	}
 }
 /*----------------------------------------------------------------------------*/
 char is_whitespace(char achar)
@@ -376,7 +352,7 @@ int fill_memorybin(memorybin_t* mem, linehex_t* hex)
 		posp = hex->lastaddr-mem->nextaddr+1;
 		if (posp<0) posp = 0;
 	}
-#if 0
+#ifdef MY1DEBUG
 	printf("\n[CHECK] Init:%04x,Next:%04x,Size:%04x,Addr:%04x,Step:%04x",
 		mem->initaddr,mem->nextaddr,mem->datasize,hex->address,hex->count);
 #endif
@@ -414,7 +390,7 @@ int hex2_memorybin(memorybin_t* mem,char* filename)
 	text_open(&text,filename);
 	if (text.pfile)
 	{
-		while (text_read(&text)==CHAR_INIT)
+		while (text_read(&text)>=CHAR_INIT)
 		{
 			temp = check_hex(text.pbuff,&linehex);
 			if (temp<0)
@@ -576,6 +552,9 @@ int main(int argc, char* argv[])
 	{
 		printf("Loading code HEX file... ");
 		temp = hex2_memorybin(&memory, pfile);
+#ifdef MY1DEBUG
+		printf("\n");
+#endif
 		if (temp<0)
 		{
 			printf("fail! (%d)\n",temp);
@@ -654,6 +633,7 @@ int main(int argc, char* argv[])
 	/* device interface configuration */
 	device.timeout_us = time_out;
 	device.error = 0;
+	device.baudhand = baudhand;
 	device.baudrate = baudrate;
 	device.label[0] = 0x0;
 	device.data = 0x0;
@@ -692,7 +672,7 @@ int main(int argc, char* argv[])
 	{
 		/** clear input buffer */
 		purge_serial(&cPort);
-		printf("\nLooking for STC12 device... ");
+		printf("\nLooking for STC12 device... "); fflush(stdout);
 		test = stc_check_isp(&device,&cPort);
 		if (test==STC_SYNC_NONE||test==STC_SYNC_REST)
 		{
@@ -708,7 +688,7 @@ int main(int argc, char* argv[])
 			continue;
 		}
 		printf("found! ");
-		printf("\nBaudrate(H): %d",baudhand);
+		printf("\nBaudrate(H): %d",device.baudhand);
 		printf("\nBaudrate(D): %d",device.baudrate);
 		if (find_devinfo(&device,&mcudb)<0)
 		{
@@ -724,7 +704,7 @@ int main(int argc, char* argv[])
 				device.fw11,device.fw12,(char)device.fw20,device.flag);
 		printf("\nFlash  Size: %2d kB",device.fmemsize);
 		printf("\nEEPROM Size: %2d kB",device.ememsize);
-		printf("\nInit handshake... ");
+		printf("\nInit handshake... "); fflush(stdout);
 		test = stc_handshake(&device,&cPort);
 		if (!test) printf("success! {%02x}",device.flag);
 		else
@@ -734,7 +714,7 @@ int main(int argc, char* argv[])
 			exit(1);
 		}
 		/* test the baudrate */
-		printf("\nInit baud test... ");
+		printf("\nInit baud test... "); fflush(stdout);
 		test = stc_bauddance(&device,&cPort);
 		if (!test) printf("success! {%02x}(%d%%)",device.flag,device.baud_err);
 		else
@@ -743,11 +723,9 @@ int main(int argc, char* argv[])
 			print_device_packet(&device);
 			exit(1);
 		}
-		/* change the baudrate if needed */
-		change_baudrate(&cPort,&cConf,device.baudrate);
-		/* confirm the baudrate? enforce? */
+		/* confirm the baudrate? */
 		device.flag = PAYLOAD_BAUD_CONFIRM;
-		printf("\nDone baud test... ");
+		printf("\nDone baud test... "); fflush(stdout);
 		test = stc_bauddance(&device,&cPort);
 		if (!test) printf("success! {%02x}(%d%%)",device.flag,device.baud_err);
 		else
@@ -759,7 +737,7 @@ int main(int argc, char* argv[])
 		/* continue only if we are flashing */
 		if (pfile)
 		{
-			printf("\nErase memory... ");
+			printf("\nErase memory... "); fflush(stdout);
 			test = stc_erase_mem(&device,&cPort);
 			if (!test) printf("success! {%02x}",device.flag);
 			else
@@ -768,7 +746,7 @@ int main(int argc, char* argv[])
 				print_device_packet(&device);
 				exit(1);
 			}
-			printf("\nFlash memory... ");
+			printf("\nFlash memory... "); fflush(stdout);
 			test = stc_flash_mem(&device,&cPort);
 			if (!test) printf("success! {%02x}",device.flag);
 			else
@@ -777,20 +755,16 @@ int main(int argc, char* argv[])
 				print_device_packet(&device);
 				exit(1);
 			}
-			printf("\nSend device options... ");
+			printf("\nSend device options... "); fflush(stdout);
 			test = stc_send_opts(&device,&cPort);
-			if (!test)
-			{
-				printf("success! {%02x}\n",device.flag);
-				print_device_packet(&device);
-			}
+			if (!test) printf("success! {%02x}",device.flag);
 			else
 			{
 				printf("error! (%d)\n",test);
 				print_device_packet(&device);
 				exit(1);
 			}
-			printf("\nReset device... ");
+			printf("\nReset device... "); fflush(stdout);
 			test = stc_reset_dev(&device,&cPort);
 			if (!test) printf("success! {%02x}",device.flag);
 			else
