@@ -76,7 +76,7 @@ void change_baudrate(ASerialPort_t* aPort, ASerialConf_t* aConf, int baudrate)
 		/* need a change! */
 		baudtemp = get_actual_baudrate(aConf->mBaudRate);
 		aConf->mBaudRate = baudcode;
-		printf("Changing baudrate: %d -> %d\n",baudtemp,baudrate);
+		printf("\nChanging baudrate: %d -> %d\n",baudtemp,baudrate);
 		set_serialconfig(aPort,aConf);
 		/* try to reopen */
 		close_serial(aPort);
@@ -654,7 +654,7 @@ int main(int argc, char* argv[])
 	/* device interface configuration */
 	device.timeout_us = time_out;
 	device.error = 0;
-	device.baudr = baudrate;
+	device.baudrate = baudrate;
 	device.label[0] = 0x0;
 	device.data = 0x0;
 	if (pfile)
@@ -709,7 +709,7 @@ int main(int argc, char* argv[])
 		}
 		printf("found! ");
 		printf("\nBaudrate(H): %d",baudhand);
-		printf("\nBaudrate(D): %d",device.baudr);
+		printf("\nBaudrate(D): %d",device.baudrate);
 		if (find_devinfo(&device,&mcudb)<0)
 		{
 			printf("\nUnknown device (%01x/%01x)!",
@@ -733,9 +733,10 @@ int main(int argc, char* argv[])
 			print_device_packet(&device);
 			exit(1);
 		}
+		/* test the baudrate */
 		printf("\nInit baud test... ");
 		test = stc_bauddance(&device,&cPort);
-		if (!test) printf("success! {%02x}",device.flag);
+		if (!test) printf("success! {%02x}(%d%%)",device.flag,device.baud_err);
 		else
 		{
 			printf("error! (%d)\n",test);
@@ -743,11 +744,12 @@ int main(int argc, char* argv[])
 			exit(1);
 		}
 		/* change the baudrate if needed */
-		change_baudrate(&cPort,&cConf,baudrate);
+		change_baudrate(&cPort,&cConf,device.baudrate);
+		/* confirm the baudrate? enforce? */
 		device.flag = PAYLOAD_BAUD_CONFIRM;
 		printf("\nDone baud test... ");
 		test = stc_bauddance(&device,&cPort);
-		if (!test) printf("success! {%02x}",device.flag);
+		if (!test) printf("success! {%02x}(%d%%)",device.flag,device.baud_err);
 		else
 		{
 			printf("error! (%d)\n",test);
@@ -777,6 +779,19 @@ int main(int argc, char* argv[])
 			}
 			printf("\nSend device options... ");
 			test = stc_send_opts(&device,&cPort);
+			if (!test)
+			{
+				printf("success! {%02x}\n",device.flag);
+				print_device_packet(&device);
+			}
+			else
+			{
+				printf("error! (%d)\n",test);
+				print_device_packet(&device);
+				exit(1);
+			}
+			printf("\nReset device... ");
+			test = stc_reset_dev(&device,&cPort);
 			if (!test) printf("success! {%02x}",device.flag);
 			else
 			{

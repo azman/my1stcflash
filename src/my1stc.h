@@ -96,6 +96,7 @@ stc_payload_info_t;
 #define PAYLOAD_FLASH_MEMORY 0x00
 #define PAYLOAD_FLASH_FINISH 0x69
 #define PAYLOAD_FLASH_OPTION 0x8d
+#define PAYLOAD_DEVICE_RESET 0x82
 /*----------------------------------------------------------------------------*/
 #define STC_DEVICE_NAME_LEN 16
 #define STC_FLASH_BLOCK_SIZE 128
@@ -103,7 +104,7 @@ stc_payload_info_t;
 /*----------------------------------------------------------------------------*/
 typedef struct _stc_dev_t
 {
-	int timeout_us, error, baudr;
+	int timeout_us, error, baudrate, baud_err;
 	int pcount;
 	unsigned char packet[STC_PACKET_SIZE];
 	stc_packet_t info;
@@ -133,6 +134,7 @@ int stc_bauddance(stc_dev_t* pdevice, serial_port_t* pport);
 int stc_erase_mem(stc_dev_t* pdevice, serial_port_t* pport);
 int stc_flash_mem(stc_dev_t* pdevice, serial_port_t* pport);
 int stc_send_opts(stc_dev_t* pdevice, serial_port_t* pport);
+int stc_reset_dev(stc_dev_t* pdevice, serial_port_t* pport);
 /*----------------------------------------------------------------------------*/
 #endif
 /*----------------------------------------------------------------------------*/

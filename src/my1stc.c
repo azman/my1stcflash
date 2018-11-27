@@ -249,8 +249,6 @@ int stc_handshake(stc_dev_t* pdevice, serial_port_t* pport)
 	return pdevice->error;
 }
 /*----------------------------------------------------------------------------*/
-#include <stdio.h>
-/*----------------------------------------------------------------------------*/
 int stc_bauddance(stc_dev_t* pdevice, serial_port_t* pport)
 {
 /*
@@ -258,25 +256,31 @@ sample_rate = 16 (6T) or 32
 brt = 65536 - round((freq)/(baudrate*sample_rate))
 brt_csum = (2*(256-brt))&0xff
 */
-	int test = 256-((pdevice->freq*1000000)/(pdevice->baudr*16));
+	int test = 256-(int)((pdevice->freq*1000000)/(pdevice->baudrate*16));
 	unsigned char baud = test&0xff;
 	unsigned char bsum = (2*(256-(int)baud))&0xff;
-	unsigned char dlay = 0x80; /* stc-isp=>0xa0, stc-gal=>0x40 */
+	unsigned char dlay = 0xa0; /* stc-isp=>0xa0, stc-gal=>0x40 */
 	unsigned char iapw = 0x83; /* iap wait register? */
 	unsigned char data[] = { pdevice->flag,0xc0,baud,0x3f,bsum,dlay,iapw };
 	int baudthat = (int)((pdevice->freq*1000000)/(16*(256-baud)));
-	int baud_err = (int)(((pdevice->baudr-baudthat)*100.0)/pdevice->baudr);
-	/* check if baudrate achievable... with acceptable error tolerance */
+	int baud_err = pdevice->baudrate-baudthat;
+	if (baud_err<0) baud_err = -baud_err;
+	baud_err = baud_err*100/pdevice->baudrate;
+	/* check if baudrate achievable */
 	if (test<=1||test>255)
 	{
 		pdevice->error += STC_PACKET_BAUDDANCE_ERROR;
 		return pdevice->error;
 	}
+	/* ... with acceptable error tolerance? */
 	if (baud_err>3)
 	{
-printf("\nBaud error=%d%% (%d-%d)\n\n",baud_err,baudthat,pdevice->baudr);
-		//pdevice->error += STC_PACKET_BAUDRATE_ERROR;
-		//return pdevice->error;
+		pdevice->baud_err = baud_err;
+/**
+ * just save the error value instead of complaining!
+		pdevice->error += STC_PACKET_BAUDRATE_ERROR;
+		return pdevice->error;
+*/
 	}
 	/* form packet */
 	stc_packet_pack(pdevice,data,sizeof(data));
@@ -408,6 +412,20 @@ int stc_send_opts(stc_dev_t* pdevice, serial_port_t* pport)
 	{
 		pdevice->flag = pdevice->info.pdata[PAYLOAD_INFO_OFFSET_FLAG];
 	}
+	return pdevice->error;
+}
+/*----------------------------------------------------------------------------*/
+int stc_reset_dev(stc_dev_t* pdevice, serial_port_t* pport)
+{
+	int loop;
+	unsigned char data[] = { PAYLOAD_DEVICE_RESET };
+	/* form packet */
+	stc_packet_pack(pdevice,data,sizeof(data));
+	/* just in case, purge the incoming line */
+	purge_serial(pport);
+	/* send the packet */
+	for (loop=0;loop<pdevice->pcount;loop++)
+		put_byte_serial(pport,pdevice->packet[loop]);
 	return pdevice->error;
 }
 /*----------------------------------------------------------------------------*/
