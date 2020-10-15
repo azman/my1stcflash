@@ -1,6 +1,6 @@
 /*----------------------------------------------------------------------------*/
-#include "my1comlib.h"
-#include "my1cons.h"
+#include "my1uart.h"
+#include "my1keys.h"
 #include "my1text.h"
 #include "my1list.h"
 #include "my1stc.h"
@@ -47,22 +47,21 @@ void about(void)
 	printf("\n");
 }
 /*----------------------------------------------------------------------------*/
-void print_portscan(ASerialPort_t* aPort)
+void print_portscan(my1uart_t* port)
 {
-	int test, cCount = 0;
+	int test, size = 0;
 	printf("--------------------\n");
 	printf("COM Port Scan Result\n");
 	printf("--------------------\n");
-	for(test=1;test<=MAX_COM_PORT;test++)
+	for (test=1;test<=MAX_COM_PORT;test++)
 	{
-		if(check_serial(aPort,test))
+		if (uart_prep(port,test))
 		{
-			printf("%s%d: ",aPort->mPortName,COM_PORT(test));
-			cCount++;
-			printf("Ready.\n");
+			printf("%s: Ready\n",port->temp);
+			size++;
 		}
 	}
-	printf("\nDetected Port(s): %d\n\n",cCount);
+	printf("\nDetected Port(s): %d\n\n",size);
 }
 /*----------------------------------------------------------------------------*/
 char is_whitespace(char achar)
@@ -101,7 +100,7 @@ int get_device_list(my1list* list,char* filename)
 {
 	char *ibuff, *tbuff, *pbuff;
 	stcmcu_t temp;
-	my1text text;
+	my1text_t text;
 	int loop;
 	/** load predefined devices */
 	for(loop=0;loop<STCMCU_DBSIZE;loop++)
@@ -120,13 +119,13 @@ int get_device_list(my1list* list,char* filename)
 		while (text_read(&text)>=CHAR_INIT)
 		{
 			/* skip whitespace to check 'empty' lines */
-			ibuff = text.pbuff;
+			ibuff = text.pbuff.buff;
 			while(is_whitespace(*ibuff)) ibuff++;
 			/* skip if empty lines! also ignore comments? */
 			if(ibuff[0]=='\0'||ibuff[0]=='#')
 				continue;
 			/* create separate token processing buffer */
-			tbuff = (char*) malloc(text.count);
+			tbuff = (char*) malloc(text.pbuff.fill);
 			strcpy(tbuff,ibuff);
 			/* break down main line components */
 			temp.flag = 0;
@@ -385,14 +384,14 @@ int hex2_memorybin(memorybin_t* mem,char* filename)
 {
 	int test = 0, temp;
 	linehex_t linehex;
-	my1text text;
+	my1text_t text;
 	text_init(&text);
 	text_open(&text,filename);
 	if (text.pfile)
 	{
 		while (text_read(&text)>=CHAR_INIT)
 		{
-			temp = check_hex(text.pbuff,&linehex);
+			temp = check_hex(text.pbuff.buff,&linehex);
 			if (temp<0)
 			{
 				test = temp;
@@ -439,9 +438,9 @@ void print_device_packet(stc_dev_t* pdevice)
 /*----------------------------------------------------------------------------*/
 int main(int argc, char* argv[])
 {
-	ASerialPort_t cPort;
-	ASerialConf_t cConf;
-	int loop, test, temp, port=1, baudrate = DEFAULT_BAUDRATE,
+	my1uart_t port;
+	my1uart_conf_t conf;
+	int loop, test, temp, pick=1, baudrate = DEFAULT_BAUDRATE,
 		baudhand = DEFAULT_BAUDRATE;
 	int time_out = STC_SYNC_TIMEOUT_US;
 	int do_command = COMMAND_NONE;
@@ -476,7 +475,7 @@ int main(int argc, char* argv[])
 					printf("Invalid port number! (%d)\n", test);
 					return ERROR_PARAM_PORT;
 				}
-				port = test;
+				pick = test;
 			}
 			else if(!strcmp(argv[loop],"--baud"))
 			{
@@ -564,47 +563,46 @@ int main(int argc, char* argv[])
 	}
 
 	/** initialize port */
-	initialize_serial(&cPort);
+	uart_init(&port);
 #ifndef DO_MINGW
-	sprintf(cPort.mPortName,"/dev/ttyUSB"); /* default on linux? */
+	sprintf(port.name,"/dev/ttyUSB"); /* default on linux? */
 #endif
 	/** check user requested name change */
-	if(ptty) sprintf(cPort.mPortName,ptty);
+	if(ptty) sprintf(port.name,ptty);
 
 	/** check if user requested a port scan */
 	if(do_command==COMMAND_SCAN)
 	{
-		print_portscan(&cPort);
+		print_portscan(&port);
 		return 0;
 	}
 
 	/** try to prepare port with requested terminal */
-	if(!port) port = find_serial(&cPort,0x0);
-	if(!set_serial(&cPort,port))
+	if(!pick) pick = uart_find(&port,0x0);
+	if(!uart_prep(&port,pick))
 	{
 		about();
-		print_portscan(&cPort);
-		printf("Cannot prepare port '%s%d'!\n\n",cPort.mPortName,
-			COM_PORT(port));
+		print_portscan(&port);
+		printf("Cannot prepare port '%s%d'!\n\n",port.name,COM_PORT(pick));
 		return ERROR_PORT_INIT;
 	}
 
 	/** get the default config */
-	get_serialconfig(&cPort,&cConf);
+	uart_get_config(&port,&conf);
 
 	/** apply custom config */
 	if(baudhand)
 	{
 		switch(baudhand)
 		{
-			case 1200: cConf.mBaudRate = MY1BAUD1200; break;
-			case 2400: cConf.mBaudRate = MY1BAUD2400; break;
-			case 4800: cConf.mBaudRate = MY1BAUD4800; break;
-			case 9600: cConf.mBaudRate = MY1BAUD9600; break;
-			case 19200: cConf.mBaudRate = MY1BAUD19200; break;
-			case 38400: cConf.mBaudRate = MY1BAUD38400; break;
-			case 57600: cConf.mBaudRate = MY1BAUD57600; break;
-			case 115200: cConf.mBaudRate = MY1BAUD115200; break;
+			case 1200: conf.baud = MY1BAUD1200; break;
+			case 2400: conf.baud = MY1BAUD2400; break;
+			case 4800: conf.baud = MY1BAUD4800; break;
+			case 9600: conf.baud = MY1BAUD9600; break;
+			case 19200: conf.baud = MY1BAUD19200; break;
+			case 38400: conf.baud = MY1BAUD38400; break;
+			case 57600: conf.baud = MY1BAUD57600; break;
+			case 115200: conf.baud = MY1BAUD115200; break;
 			default:
 				printf("Invalid handshake baud (%d)! Using default (%d)!\n",
 					baudhand,DEFAULT_BAUDRATE);
@@ -625,10 +623,10 @@ int main(int argc, char* argv[])
 				baudrate = DEFAULT_BAUDRATE;
 		}
 	}
-	cConf.mParity = MY1PARITY_EVEN; /** stc12 uses this! */
+	conf.bpar = MY1PARITY_EVEN; /** stc12 uses this! */
 
 	/** set the desired config */
-	set_serialconfig(&cPort,&cConf);
+	uart_set_config(&port,&conf);
 
 	/* device interface configuration */
 	device.timeout_us = time_out;
@@ -660,10 +658,9 @@ int main(int argc, char* argv[])
 #endif
 
 	/** try to open port */
-	if(!open_serial(&cPort))
+	if(!uart_open(&port))
 	{
-		printf("\nCannot open port '%s%d'!\n\n",cPort.mPortName,
-			COM_PORT(cPort.mPortIndex));
+		printf("\nCannot open port '%s%d'!\n\n",port.name,COM_PORT(port.term));
 		return ERROR_PORT_OPEN;
 	}
 
@@ -671,9 +668,9 @@ int main(int argc, char* argv[])
 	do
 	{
 		/** clear input buffer */
-		purge_serial(&cPort);
+		uart_purge(&port);
 		printf("\nLooking for STC12 device... "); fflush(stdout);
-		test = stc_check_isp(&device,&cPort);
+		test = stc_check_isp(&device,&port);
 		if (test==STC_SYNC_NONE||test==STC_SYNC_REST)
 		{
 			printf("user abort. (%d)",test);
@@ -705,7 +702,7 @@ int main(int argc, char* argv[])
 		printf("\nFlash  Size: %2d kB",device.fmemsize);
 		printf("\nEEPROM Size: %2d kB",device.ememsize);
 		printf("\nInit handshake... "); fflush(stdout);
-		test = stc_handshake(&device,&cPort);
+		test = stc_handshake(&device,&port);
 		if (!test) printf("success! {%02x}",device.flag);
 		else
 		{
@@ -715,7 +712,7 @@ int main(int argc, char* argv[])
 		}
 		/* test the baudrate */
 		printf("\nInit baud test... "); fflush(stdout);
-		test = stc_bauddance(&device,&cPort);
+		test = stc_bauddance(&device,&port);
 		if (!test) printf("success! {%02x}(%d%%)",device.flag,device.baud_err);
 		else
 		{
@@ -726,7 +723,7 @@ int main(int argc, char* argv[])
 		/* confirm the baudrate? */
 		device.flag = PAYLOAD_BAUD_CONFIRM;
 		printf("\nDone baud test... "); fflush(stdout);
-		test = stc_bauddance(&device,&cPort);
+		test = stc_bauddance(&device,&port);
 		if (!test) printf("success! {%02x}(%d%%)",device.flag,device.baud_err);
 		else
 		{
@@ -738,7 +735,7 @@ int main(int argc, char* argv[])
 		if (pfile)
 		{
 			printf("\nErase memory... "); fflush(stdout);
-			test = stc_erase_mem(&device,&cPort);
+			test = stc_erase_mem(&device,&port);
 			if (!test) printf("success! {%02x}",device.flag);
 			else
 			{
@@ -747,7 +744,7 @@ int main(int argc, char* argv[])
 				exit(1);
 			}
 			printf("\nFlash memory... "); fflush(stdout);
-			test = stc_flash_mem(&device,&cPort);
+			test = stc_flash_mem(&device,&port);
 			if (!test) printf("success! {%02x}",device.flag);
 			else
 			{
@@ -756,7 +753,7 @@ int main(int argc, char* argv[])
 				exit(1);
 			}
 			printf("\nSend device options... "); fflush(stdout);
-			test = stc_send_opts(&device,&cPort);
+			test = stc_send_opts(&device,&port);
 			if (!test) printf("success! {%02x}",device.flag);
 			else
 			{
@@ -765,7 +762,7 @@ int main(int argc, char* argv[])
 				exit(1);
 			}
 			printf("\nReset device... "); fflush(stdout);
-			test = stc_reset_dev(&device,&cPort);
+			test = stc_reset_dev(&device,&port);
 			if (!test) printf("success! {%02x}",device.flag);
 			else
 			{
@@ -784,7 +781,7 @@ int main(int argc, char* argv[])
 	free_memorybin(&memory);
 
 	/** we are done */
-	close_serial(&cPort);
+	uart_done(&port);
 
 	return 0;
 }

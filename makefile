@@ -2,9 +2,8 @@
 
 PROJECT = my1stcflash
 MAINPRO = $(PROJECT)
-OBJECTS = my1comlib.o my1cons.o my1text.o my1list.o my1stc.o $(PROJECT).o
-EXTPATH = ../my1termu/src
-EX2PATH = ../my1codelib/src
+OBJECTS = my1uart.o my1keys.o my1text.o my1list.o my1stc.o $(PROJECT).o
+EXTPATH = ../my1codelib/src
 VERSION ?= $(shell date +%Y%m%d)
 PLATBIN ?= $(shell uname -m)
 PACKDIR = $(PROJECT)-$(shell cat VERSION)
@@ -14,7 +13,7 @@ ARCHEXT = .tar.bz2
 
 COPY = cp
 DELETE = rm -rf
-CFLAGS += -Wall --static -I$(EXTPATH) -I$(EX2PATH)
+CFLAGS += -Wall --static -I$(EXTPATH)
 LFLAGS +=
 OFLAGS =
 XFLAGS =
@@ -80,9 +79,6 @@ $(MAINPRO): $(OBJECTS)
 	$(CPP) $(CFLAGS) $(XFLAGS) $(PFLAGS) -c $<
 
 %.o: $(EXTPATH)/%.c $(EXTPATH)/%.h
-	$(CC) $(CFLAGS) $(XFLAGS) -c $<
-
-%.o: $(EX2PATH)/%.c $(EX2PATH)/%.h
 	$(CC) $(CFLAGS) $(XFLAGS) -c $<
 
 clean:

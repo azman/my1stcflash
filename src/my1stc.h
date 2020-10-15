@@ -2,7 +2,7 @@
 #ifndef __MY1STCH__
 #define __MY1STCH__
 /*----------------------------------------------------------------------------*/
-#include "my1comlib.h"
+#include "my1uart.h"
 /*----------------------------------------------------------------------------*/
 #define STC_SYNC_CHAR 0x7f
 #define STC_SYNC_TIMEOUT_US 200000
@@ -117,14 +117,14 @@ typedef struct _stcmcu_t
 }
 stcmcu_t;
 /*----------------------------------------------------------------------------*/
-int stc_check_isp(stc_dev_t* pdevice, serial_port_t* pport);
-int stc_handshake(stc_dev_t* pdevice, serial_port_t* pport);
-int stc_bauddance(stc_dev_t* pdevice, serial_port_t* pport);
-int stc_baud_pong(stc_dev_t* pdevice, serial_port_t* pport);
-int stc_erase_mem(stc_dev_t* pdevice, serial_port_t* pport);
-int stc_flash_mem(stc_dev_t* pdevice, serial_port_t* pport);
-int stc_send_opts(stc_dev_t* pdevice, serial_port_t* pport);
-int stc_reset_dev(stc_dev_t* pdevice, serial_port_t* pport);
+int stc_check_isp(stc_dev_t* pdevice, my1uart_t* pport);
+int stc_handshake(stc_dev_t* pdevice, my1uart_t* pport);
+int stc_bauddance(stc_dev_t* pdevice, my1uart_t* pport);
+int stc_baud_pong(stc_dev_t* pdevice, my1uart_t* pport);
+int stc_erase_mem(stc_dev_t* pdevice, my1uart_t* pport);
+int stc_flash_mem(stc_dev_t* pdevice, my1uart_t* pport);
+int stc_send_opts(stc_dev_t* pdevice, my1uart_t* pport);
+int stc_reset_dev(stc_dev_t* pdevice, my1uart_t* pport);
 /*----------------------------------------------------------------------------*/
 #endif
 /*----------------------------------------------------------------------------*/
